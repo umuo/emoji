@@ -3,6 +3,7 @@
 import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type EditorMode = "ai" | "meme" | "gif";
+type LayoutId = "poster" | "dialogue" | "sticker" | "editorial";
 
 type MemeTemplate = {
   id: string;
@@ -20,6 +21,12 @@ type FontOption = {
   sample: string;
   family: string;
   weight: number;
+};
+
+type LayoutOption = {
+  id: LayoutId;
+  name: string;
+  description: string;
 };
 
 type AiIdea = {
@@ -77,6 +84,15 @@ const FONT_OPTIONS: FontOption[] = [
   { id: "hand", name: "潇洒手写", sample: "随它去吧", family: "'Xingkai SC', STXingkai, cursive", weight: 700 },
   { id: "mono", name: "故障等宽", sample: "加载失败", family: "'Courier New', 'Microsoft YaHei', monospace", weight: 900 },
 ];
+
+const LAYOUT_OPTIONS: LayoutOption[] = [
+  { id: "poster", name: "巨字海报", description: "主梗抢占画面" },
+  { id: "dialogue", name: "气泡对话", description: "像聊天截图" },
+  { id: "sticker", name: "贴纸弹幕", description: "歪一点更有梗" },
+  { id: "editorial", name: "杂志标题", description: "克制但有态度" },
+];
+
+const AI_LAYOUT_SEQUENCE: LayoutId[] = ["poster", "dialogue", "sticker"];
 
 const TEMPLATES: MemeTemplate[] = [
   {
@@ -165,6 +181,28 @@ function splitLines(
   return lines.filter(Boolean);
 }
 
+function roundedRectPath(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+) {
+  const safeRadius = Math.min(radius, width / 2, height / 2);
+  context.beginPath();
+  context.moveTo(x + safeRadius, y);
+  context.lineTo(x + width - safeRadius, y);
+  context.quadraticCurveTo(x + width, y, x + width, y + safeRadius);
+  context.lineTo(x + width, y + height - safeRadius);
+  context.quadraticCurveTo(x + width, y + height, x + width - safeRadius, y + height);
+  context.lineTo(x + safeRadius, y + height);
+  context.quadraticCurveTo(x, y + height, x, y + height - safeRadius);
+  context.lineTo(x, y + safeRadius);
+  context.quadraticCurveTo(x, y, x + safeRadius, y);
+  context.closePath();
+}
+
 function fileSizeLabel(bytes: number) {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -179,6 +217,7 @@ export default function Home() {
   const [textColor, setTextColor] = useState("#ffffff");
   const [outlineColor, setOutlineColor] = useState("#111111");
   const [fontId, setFontId] = useState<FontOption["id"]>("bold");
+  const [layoutId, setLayoutId] = useState<LayoutId>("poster");
   const [aiVisual, setAiVisual] = useState<MemeTemplate | null>(null);
   const [uploadedImage, setUploadedImage] = useState<HTMLImageElement | null>(null);
   const [uploadName, setUploadName] = useState("");
@@ -221,6 +260,7 @@ export default function Home() {
   );
   const selectedTemplate = aiVisual ?? manualTemplate;
   const selectedFont = FONT_OPTIONS.find((font) => font.id === fontId) ?? FONT_OPTIONS[0];
+  const selectedLayout = LAYOUT_OPTIONS.find((layout) => layout.id === layoutId) ?? LAYOUT_OPTIONS[0];
 
   const paintMeme = useCallback(() => {
     const canvas = canvasRef.current;
@@ -268,28 +308,246 @@ export default function Home() {
       context.fillText(selectedTemplate.emoji, size / 2, size / 2 + 36);
     }
 
-    const drawText = (text: string, anchorY: number, fromBottom = false) => {
-      context.font = `${selectedFont.weight} ${fontSize}px ${selectedFont.family}`;
-      context.textAlign = "center";
+    const measureLines = (
+      text: string,
+      textSize: number,
+      maxWidth: number,
+      maxLines = 3,
+      weight = selectedFont.weight,
+      family = selectedFont.family,
+    ) => {
+      context.save();
+      context.font = `${weight} ${textSize}px ${family}`;
+      const lines = splitLines(context, text, maxWidth, maxLines);
+      context.restore();
+      return lines;
+    };
+
+    const paintLines = (
+      lines: string[],
+      options: {
+        x: number;
+        y: number;
+        textSize: number;
+        align?: CanvasTextAlign;
+        fill?: string;
+        stroke?: string;
+        strokeWidth?: number;
+        lineHeight?: number;
+        weight?: number;
+        family?: string;
+      },
+    ) => {
+      const {
+        x,
+        y,
+        textSize,
+        align = "left",
+        fill = textColor,
+        stroke = outlineColor,
+        strokeWidth = Math.max(7, textSize * 0.12),
+        lineHeight = textSize * 1.08,
+        weight = selectedFont.weight,
+        family = selectedFont.family,
+      } = options;
+      context.save();
+      context.font = `${weight} ${textSize}px ${family}`;
+      context.textAlign = align;
       context.textBaseline = "middle";
       context.lineJoin = "round";
       context.miterLimit = 2;
-      const lines = splitLines(context, text, size - 140, 3);
-      const lineHeight = fontSize * 1.2;
-      const blockHeight = (lines.length - 1) * lineHeight;
-      const firstY = fromBottom ? anchorY - blockHeight : anchorY;
       lines.forEach((line, index) => {
-        const y = firstY + index * lineHeight;
-        context.strokeStyle = outlineColor;
-        context.lineWidth = Math.max(8, fontSize * 0.16);
-        context.strokeText(line, size / 2, y);
-        context.fillStyle = textColor;
-        context.fillText(line, size / 2, y);
+        const lineY = y + index * lineHeight;
+        if (strokeWidth > 0) {
+          context.strokeStyle = stroke;
+          context.lineWidth = strokeWidth;
+          context.strokeText(line, x, lineY);
+        }
+        context.fillStyle = fill;
+        context.fillText(line, x, lineY);
       });
+      context.restore();
     };
 
-    drawText(topText, 105);
-    drawText(bottomText, size - 110, true);
+    const drawSticker = (
+      text: string,
+      x: number,
+      y: number,
+      width: number,
+      fill: string,
+      foreground: string,
+      rotation: number,
+      textSize: number,
+      maxLines = 2,
+    ) => {
+      const paddingX = 34;
+      const lines = measureLines(text, textSize, width - paddingX * 2, maxLines);
+      const lineHeight = textSize * 1.08;
+      const height = Math.max(86, lines.length * lineHeight + 42);
+      context.save();
+      context.translate(x, y);
+      context.rotate(rotation);
+      context.shadowColor = "rgba(23,23,20,.28)";
+      context.shadowBlur = 0;
+      context.shadowOffsetX = 12;
+      context.shadowOffsetY = 12;
+      roundedRectPath(context, -width / 2, -height / 2, width, height, 18);
+      context.fillStyle = fill;
+      context.fill();
+      context.shadowColor = "transparent";
+      context.strokeStyle = "#171714";
+      context.lineWidth = 7;
+      context.stroke();
+      paintLines(lines, {
+        x: -width / 2 + paddingX,
+        y: -((lines.length - 1) * lineHeight) / 2,
+        textSize,
+        fill: foreground,
+        stroke: foreground === "#171714" ? "#171714" : outlineColor,
+        strokeWidth: foreground === "#171714" ? 0 : Math.max(5, textSize * .08),
+        lineHeight,
+      });
+      context.restore();
+    };
+
+    const drawBubble = (
+      text: string,
+      x: number,
+      y: number,
+      width: number,
+      fill: string,
+      foreground: string,
+      label: string,
+      tailOnRight = false,
+    ) => {
+      const textSize = Math.min(68, Math.max(42, fontSize * .78));
+      const lines = measureLines(text, textSize, width - 76, 3);
+      const lineHeight = textSize * 1.12;
+      const height = Math.max(150, lines.length * lineHeight + 86);
+      context.save();
+      roundedRectPath(context, x, y, width, height, 34);
+      context.fillStyle = fill;
+      context.fill();
+      context.strokeStyle = "#171714";
+      context.lineWidth = 8;
+      context.stroke();
+      context.beginPath();
+      if (tailOnRight) {
+        context.moveTo(x + width - 118, y + height - 5);
+        context.lineTo(x + width - 48, y + height + 52);
+        context.lineTo(x + width - 58, y + height - 5);
+      } else {
+        context.moveTo(x + 72, y + height - 5);
+        context.lineTo(x + 28, y + height + 52);
+        context.lineTo(x + 128, y + height - 5);
+      }
+      context.closePath();
+      context.fillStyle = fill;
+      context.fill();
+      context.strokeStyle = "#171714";
+      context.lineWidth = 8;
+      context.stroke();
+      context.fillStyle = "#171714";
+      context.font = "900 24px Arial, PingFang SC, sans-serif";
+      context.textAlign = "left";
+      context.textBaseline = "middle";
+      context.fillText(label, x + 36, y + 30);
+      paintLines(lines, {
+        x: x + 38,
+        y: y + 72,
+        textSize,
+        fill: foreground,
+        stroke: foreground,
+        strokeWidth: 0,
+        lineHeight,
+      });
+      context.restore();
+      return height;
+    };
+
+    const mainSize = Math.min(122, Math.max(62, fontSize * 1.36));
+    const supportSize = Math.min(62, Math.max(34, fontSize * .68));
+
+    if (layoutId === "poster") {
+      context.save();
+      context.translate(1012, 500);
+      context.rotate(Math.PI / 2);
+      context.font = "900 22px Arial, sans-serif";
+      context.textAlign = "center";
+      context.fillStyle = "rgba(23,23,20,.7)";
+      context.fillText("TODAY'S MOOD  ·  TODAY'S MOOD", 0, 0);
+      context.restore();
+      drawSticker(topText, 390, 156, 650, "#ffd84d", "#171714", -.035, supportSize, 2);
+      context.fillStyle = "#171714";
+      context.fillRect(68, 570, 150, 18);
+      const posterLines = measureLines(bottomText, mainSize, 930, 3);
+      paintLines(posterLines, {
+        x: 70,
+        y: 650,
+        textSize: mainSize,
+        fill: textColor,
+        stroke: outlineColor,
+        strokeWidth: Math.max(10, mainSize * .13),
+        lineHeight: mainSize * 1.02,
+      });
+    } else if (layoutId === "dialogue") {
+      drawBubble(topText, 68, 110, 720, "rgba(255,253,248,.95)", "#171714", "我");
+      drawBubble(bottomText, 292, 690, 720, "#ffd84d", "#171714", "现实", true);
+    } else if (layoutId === "sticker") {
+      context.save();
+      context.font = "900 86px Arial, sans-serif";
+      context.fillStyle = "#ff6b46";
+      context.fillText("✦", 850, 180);
+      context.fillStyle = "#ffd84d";
+      context.fillText("!!!", 76, 840);
+      context.restore();
+      drawSticker(topText, 410, 190, 760, "#fffdf8", "#171714", -.055, Math.min(70, supportSize * 1.08), 2);
+      drawSticker(bottomText, 640, 770, 790, "#171714", textColor, .045, Math.min(92, mainSize * .76), 3);
+      context.save();
+      context.translate(116, 500);
+      context.rotate(-.08);
+      context.fillStyle = "#8cd8ca";
+      context.strokeStyle = "#171714";
+      context.lineWidth = 5;
+      context.fillRect(-20, -42, 180, 70);
+      context.strokeRect(-20, -42, 180, 70);
+      context.fillStyle = "#171714";
+      context.font = "900 24px monospace";
+      context.fillText("MOOD #01", 0, 4);
+      context.restore();
+    } else {
+      context.fillStyle = "#ff6b46";
+      context.fillRect(0, 0, 44, size);
+      context.save();
+      context.translate(24, 540);
+      context.rotate(-Math.PI / 2);
+      context.font = "900 18px monospace";
+      context.textAlign = "center";
+      context.fillStyle = "#171714";
+      context.fillText("GENG YI XIA · DAILY EMOTION", 0, 0);
+      context.restore();
+      drawSticker(topText, 360, 148, 560, "#ffd84d", "#171714", -.02, supportSize, 2);
+      context.fillStyle = "rgba(23,23,20,.9)";
+      context.strokeStyle = "rgba(255,255,255,.9)";
+      context.lineWidth = 6;
+      roundedRectPath(context, 72, 600, 936, 350, 8);
+      context.fill();
+      context.stroke();
+      const editorialLines = measureLines(bottomText, Math.min(104, mainSize), 850, 3);
+      paintLines(editorialLines, {
+        x: 110,
+        y: 690,
+        textSize: Math.min(104, mainSize),
+        fill: textColor,
+        stroke: outlineColor,
+        strokeWidth: Math.max(5, mainSize * .07),
+        lineHeight: Math.min(104, mainSize) * 1.02,
+      });
+      context.fillStyle = "#ffd84d";
+      context.font = "900 20px monospace";
+      context.textAlign = "right";
+      context.fillText("VOL. 01 / FEELING", 978, 924);
+    }
 
     context.save();
     context.font = "700 24px Arial, PingFang SC, sans-serif";
@@ -301,7 +559,7 @@ export default function Home() {
     context.strokeText("梗一下 · 本地创作", size - 24, size - 20);
     context.fillText("梗一下 · 本地创作", size - 24, size - 20);
     context.restore();
-  }, [bottomText, fontSize, outlineColor, selectedFont, selectedTemplate, textColor, topText, uploadedImage]);
+  }, [bottomText, fontSize, layoutId, outlineColor, selectedFont, selectedTemplate, textColor, topText, uploadedImage]);
 
   useEffect(() => {
     paintMeme();
@@ -414,6 +672,7 @@ export default function Home() {
     setTopText(idea.top.slice(0, 40));
     setBottomText(idea.bottom.slice(0, 40));
     setFontId(idea.fontId);
+    setLayoutId(AI_LAYOUT_SEQUENCE[index % AI_LAYOUT_SEQUENCE.length]);
     setUploadedImage(null);
     setUploadName("");
   };
@@ -745,7 +1004,7 @@ export default function Home() {
                             onClick={() => applyAiIdea(idea, index)}
                           >
                             <span className="idea-emoji">{idea.emoji}</span>
-                            <span><b>{idea.label}</b><small>{idea.top} / {idea.bottom}</small></span>
+                            <span><b>{idea.label}</b><small>{idea.top} → {idea.bottom}</small></span>
                           </button>
                         ))}
                       </div>
@@ -789,19 +1048,34 @@ export default function Home() {
 
               <div className="section-heading compact">
                 <span>2</span>
-                <div><h2>{mode === "ai" ? "不满意就自己改" : "写点什么"}</h2><p>文案和字体都会实时更新</p></div>
+                <div><h2>{mode === "ai" ? "不满意就自己改" : "写点什么"}</h2><p>版式、文案和字体都会实时更新</p></div>
               </div>
 
-              <label className="field-label" htmlFor="top-copy">上方文字</label>
+              <label className="field-label" htmlFor="top-copy">铺垫文案</label>
               <div className="text-field-wrap">
                 <textarea id="top-copy" value={topText} onChange={(event) => setTopText(event.target.value)} maxLength={40} />
                 <small>{topText.length}/40</small>
               </div>
 
-              <label className="field-label" htmlFor="bottom-copy">下方文字</label>
+              <label className="field-label" htmlFor="bottom-copy">包袱文案</label>
               <div className="text-field-wrap">
                 <textarea id="bottom-copy" value={bottomText} onChange={(event) => setBottomText(event.target.value)} maxLength={40} />
                 <small>{bottomText.length}/40</small>
+              </div>
+
+              <p className="mini-label layout-label">排版玩法 · {selectedLayout.name}</p>
+              <div className="layout-grid" aria-label="选择文字排版">
+                {LAYOUT_OPTIONS.map((layout) => (
+                  <button
+                    key={layout.id}
+                    className={layoutId === layout.id ? `selected ${layout.id}` : layout.id}
+                    onClick={() => setLayoutId(layout.id)}
+                    aria-label={`使用${layout.name}排版`}
+                  >
+                    <span className="layout-mini" aria-hidden="true"><i /><i /><i /></span>
+                    <span><b>{layout.name}</b><small>{layout.description}</small></span>
+                  </button>
+                ))}
               </div>
 
               <p className="mini-label font-label">字体风格 · {selectedFont.name}</p>
@@ -938,7 +1212,7 @@ export default function Home() {
       <section className="benefits" aria-label="产品特点">
         <article><span>01</span><h3>AI 懂你的情绪</h3><p>一句真实感受，马上得到三套不同语气的表情包方案。</p></article>
         <article><span>02</span><h3>素材不出本机</h3><p>图片和视频在浏览器中处理，隐私不用赌运气。</p></article>
-        <article><span>03</span><h3>八种字体随便换</h3><p>从快乐体到宋体、楷体和手写体，生成就能直接发。</p></article>
+        <article><span>03</span><h3>四种版式随便玩</h3><p>海报、对话、贴纸和杂志构图，再叠八种字体，不做流水线梗图。</p></article>
       </section>
 
       <footer><span>梗一下 · 让每句话都有表情</span><small>Made for 灵感爆发的那一刻</small></footer>
