@@ -2,12 +2,14 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import { handleGenerateMeme } from "../lib/meme-ai";
+import { handleGenerateMemeImage } from "../lib/meme-image-ai";
 
 interface Env {
   ASSETS: Fetcher;
   DB: D1Database;
   OPENAI_API_KEY?: string;
   OPENAI_MODEL?: string;
+  OPENAI_IMAGE_MODEL?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -34,6 +36,10 @@ const worker = {
 
     if (url.pathname === "/api/generate-meme") {
       return handleGenerateMeme(request, env);
+    }
+
+    if (url.pathname === "/api/generate-image") {
+      return handleGenerateMemeImage(request, env);
     }
 
     if (url.pathname === "/_vinext/image") {

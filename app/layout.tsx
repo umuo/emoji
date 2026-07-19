@@ -3,8 +3,8 @@ import { headers } from "next/headers";
 import "@fontsource/zcool-kuaile/chinese-simplified.css";
 import "./globals.css";
 
-const title = "梗一下｜AI 心情表情包与 GIF 制作器";
-const description = "说出现在的感受，让 AI 生成三套表情包；还支持多种字体、图片编辑和视频转 GIF。";
+const title = "梗一下｜AI 表情包生成器与 GIF 制作器";
+const description = "用感受生成表情包文案，或通过提示词和参考图直接 AI 生图；还支持多种字体、图片编辑与视频转 GIF。";
 
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();
@@ -26,7 +26,7 @@ export async function generateMetadata(): Promise<Metadata> {
       siteName: "梗一下",
       locale: "zh_CN",
       type: "website",
-      images: [{ url: imageUrl, width: 1200, height: 630, alt: "梗一下在线表情包与 GIF 制作器" }],
+      images: [{ url: imageUrl, width: 1200, height: 630, alt: "梗一下 AI 表情包生成器与 GIF 制作器" }],
     },
     twitter: {
       card: "summary_large_image",

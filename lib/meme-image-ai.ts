@@ -1,0 +1,235 @@
+import { isPrivateHostname, parseProvider, type ProviderConfig } from "./meme-ai";
+
+export type MemeImageEnv = {
+  OPENAI_API_KEY?: string;
+  OPENAI_MODEL?: string;
+  OPENAI_IMAGE_MODEL?: string;
+};
+
+const jsonHeaders = {
+  "content-type": "application/json; charset=utf-8",
+  "cache-control": "no-store",
+};
+
+const stylePrompts: Record<string, string> = {
+  internet: "中文互联网斗图风，反应强烈，构图直接，笑点一眼能看懂",
+  sticker: "精致立体贴纸风，角色轮廓清晰，适合聊天软件发送",
+  doodle: "松弛手绘涂鸦风，线条有个性，像朋友随手画出的神图",
+  absurd: "荒诞超现实发疯风，视觉反差强，但主体仍然清楚",
+  photo: "写实反应图风，像被精准抓拍到的情绪瞬间",
+};
+
+const MEME_IMAGE_SYSTEM_PROMPT = `
+你是一名只创作社交表情包的视觉导演。无论用户描述什么，都要把需求转化成一张可以直接发在中文聊天中的表情包，而不是普通插画、风景照、商业海报、UI 截图或长篇漫画。
+
+硬性要求：
+1. 输出单张 1:1 方形表情包，主体明确，手机聊天窗口缩略图里也能一眼看懂。
+2. 优先呈现夸张而准确的情绪、动作和反应，画面只保留一个核心笑点，避免复杂背景。
+3. 如果用户提供参考图片，把其中的主体或角色转化为表情包并尽量保留可识别特征；不要只是给原图加滤镜。
+4. 只有用户明确给出配字、台词或引号内文字时才在图中加入文字；必须尽量准确呈现原文，字少、醒目、对比强。用户没要求文字时不要擅自生成乱码。
+5. 不添加平台水印、二维码、品牌 Logo 或多余边框。避免针对真实个人的羞辱、仇恨、威胁或恶意攻击。
+6. 最终画面必须以“表情包是否好用、好笑、适合转发”为最高标准。
+`.trim();
+
+export async function handleGenerateMemeImage(request: Request, env: MemeImageEnv): Promise<Response> {
+  if (request.method !== "POST") return jsonError("只支持 POST 请求", 405);
+
+  let form: FormData;
+  try {
+    form = await request.formData();
+  } catch {
+    return jsonError("请求内容必须是表单数据", 400);
+  }
+
+  const prompt = typeof form.get("prompt") === "string"
+    ? String(form.get("prompt")).trim().slice(0, 600)
+    : "";
+  const styleId = typeof form.get("style") === "string" ? String(form.get("style")) : "internet";
+  const style = stylePrompts[styleId] || stylePrompts.internet;
+  if (prompt.length < 2) return jsonError("请描述一下想生成什么表情包", 400);
+
+  const imageEntry = form.get("image");
+  const referenceImage = imageEntry && typeof imageEntry !== "string" ? imageEntry : null;
+  if (referenceImage) {
+    if (!new Set(["image/png", "image/jpeg", "image/webp"]).has(referenceImage.type)) {
+      return jsonError("参考图片仅支持 PNG、JPG 或 WEBP", 400);
+    }
+    if (referenceImage.size > 10 * 1024 * 1024) {
+      return jsonError("参考图片请控制在 10 MB 以内", 400);
+    }
+  }
+
+  const providerResult = resolveProvider(form.get("provider"), env);
+  if ("error" in providerResult) return jsonError(providerResult.error || "自定义接口设置不完整", 400);
+  const provider = providerResult.value;
+  const imageModelName = provider.imageModelName || env.OPENAI_IMAGE_MODEL || "gpt-image-2";
+  const fullPrompt = `${MEME_IMAGE_SYSTEM_PROMPT}\n\n视觉风格：${style}\n\n用户需求：${prompt}`;
+  const action = referenceImage ? "edits" : "generations";
+  const endpoint = buildImageEndpoint(provider.baseUrl, action);
+
+  try {
+    let response = await callImageProvider(endpoint, provider, imageModelName, fullPrompt, referenceImage, false);
+    if (!response.ok && [400, 415, 422].includes(response.status)) {
+      response = await callImageProvider(endpoint, provider, imageModelName, fullPrompt, referenceImage, true);
+    }
+    if (response.status >= 300 && response.status < 400) {
+      return jsonError("生图接口返回了跳转响应，请在 Base URL 中填写最终 HTTPS 地址", 502);
+    }
+    if (!response.ok) {
+      const providerError = await readProviderError(response, provider.apiKey);
+      return jsonError(providerError || `生图接口返回 ${response.status}`, 502);
+    }
+
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      return jsonError("生图接口没有返回有效 JSON", 502);
+    }
+    const image = readImageResult(payload);
+    if (!image) return jsonError("生图接口响应中没有图片数据", 502);
+
+    return new Response(JSON.stringify({
+      imageUrl: image.url,
+      model: imageModelName,
+      referenceUsed: Boolean(referenceImage),
+      notice: referenceImage ? "已参考上传图片生成新的表情包" : "已根据提示词生成表情包",
+    }), { headers: jsonHeaders });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      return jsonError("生图时间有点久，请稍后重试", 504);
+    }
+    const message = error instanceof Error ? error.message : "生图接口连接失败";
+    return jsonError(`生图接口连接失败：${message}`, 502);
+  }
+}
+
+function resolveProvider(value: FormDataEntryValue | null, env: MemeImageEnv) {
+  if (typeof value === "string" && value.trim()) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      return { error: "自定义 AI 设置不是有效 JSON" } as const;
+    }
+    return parseProvider(parsed);
+  }
+  if (!env.OPENAI_API_KEY) {
+    return { error: "请先在 AI 设置中启用自定义接口，并填写生图模型" } as const;
+  }
+  return {
+    value: {
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: env.OPENAI_API_KEY,
+      modelName: env.OPENAI_MODEL || "gpt-5.6-sol",
+      imageModelName: env.OPENAI_IMAGE_MODEL || "gpt-image-2",
+    } satisfies ProviderConfig,
+  } as const;
+}
+
+function buildImageEndpoint(baseUrl: string, action: "generations" | "edits") {
+  if (/\/images\/(?:generations|edits)$/i.test(baseUrl)) {
+    return baseUrl.replace(/\/images\/(?:generations|edits)$/i, `/images/${action}`);
+  }
+  return `${baseUrl}/images/${action}`;
+}
+
+async function callImageProvider(
+  endpoint: string,
+  provider: ProviderConfig,
+  model: string,
+  prompt: string,
+  image: File | null,
+  minimal: boolean,
+) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 115000);
+  const headers: Record<string, string> = {};
+  if (provider.apiKey) headers.authorization = `Bearer ${provider.apiKey}`;
+
+  let body: BodyInit;
+  if (image) {
+    const upstream = new FormData();
+    upstream.append("model", model);
+    upstream.append("prompt", prompt);
+    upstream.append("image", image, image.name || "reference.png");
+    if (!minimal) {
+      upstream.append("size", "1024x1024");
+      upstream.append("quality", "medium");
+    }
+    body = upstream;
+  } else {
+    headers["content-type"] = "application/json";
+    body = JSON.stringify({
+      model,
+      prompt,
+      ...(!minimal ? { size: "1024x1024", quality: "medium" } : {}),
+    });
+  }
+
+  try {
+    return await fetch(endpoint, {
+      method: "POST",
+      headers,
+      body,
+      redirect: "manual",
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function readImageResult(payload: unknown) {
+  if (!payload || typeof payload !== "object") return null;
+  const object = payload as Record<string, unknown>;
+  const pools = [object.data, object.images, object.output];
+  const first = pools.find(Array.isArray)?.[0];
+  const item = first && typeof first === "object" ? first as Record<string, unknown> : object;
+  const rawBase64 = [item.b64_json, item.base64, item.image_base64, object.b64_json]
+    .find((value) => typeof value === "string") as string | undefined;
+  if (rawBase64) {
+    if (rawBase64.startsWith("data:image/")) return { url: rawBase64 };
+    if (rawBase64.length > 40 * 1024 * 1024 || !/^[A-Za-z0-9+/=\r\n]+$/.test(rawBase64)) return null;
+    return { url: `data:image/png;base64,${rawBase64.replace(/[\r\n]/g, "")}` };
+  }
+
+  const rawUrl = [item.url, item.image_url, object.url].find((value) => typeof value === "string") as string | undefined;
+  if (!rawUrl) return null;
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== "https:" || isPrivateHostname(parsed.hostname)) return null;
+    return { url: parsed.toString() };
+  } catch {
+    return null;
+  }
+}
+
+async function readProviderError(response: Response, apiKey: string) {
+  try {
+    const text = (await response.text()).slice(0, 1200);
+    const payload = JSON.parse(text) as {
+      error?: { message?: unknown; code?: unknown } | string;
+      message?: unknown;
+    };
+    const code = typeof payload.error === "object" && payload.error
+      ? payload.error.code
+      : undefined;
+    if (code === "moderation_blocked") return "这个提示词未通过生图安全检查，请减少攻击性或针对个人的描述";
+    const message = typeof payload.error === "string"
+      ? payload.error
+      : typeof payload.error?.message === "string"
+        ? payload.error.message
+        : typeof payload.message === "string"
+          ? payload.message
+          : "";
+    const safeMessage = apiKey ? message.replaceAll(apiKey, "[REDACTED]") : message;
+    return safeMessage.replace(/[\r\n\t]+/g, " ").slice(0, 220);
+  } catch {
+    return "";
+  }
+}
+
+function jsonError(error: string, status: number) {
+  return new Response(JSON.stringify({ error }), { status, headers: jsonHeaders });
+}

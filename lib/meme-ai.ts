@@ -17,10 +17,11 @@ type MemeAiResult = {
   candidates: MemeIdea[];
 };
 
-type ProviderConfig = {
+export type ProviderConfig = {
   baseUrl: string;
   apiKey: string;
   modelName: string;
+  imageModelName?: string;
 };
 
 const toneNames: Record<string, string> = {
@@ -211,15 +212,17 @@ export async function handleGenerateMeme(request: Request, env: MemeAiEnv): Prom
   }
 }
 
-function parseProvider(value: unknown): { value: ProviderConfig } | { error: string } {
+export function parseProvider(value: unknown): { value: ProviderConfig } | { error: string } {
   if (!value || typeof value !== "object") return { error: "自定义接口设置不完整" };
   const raw = value as Record<string, unknown>;
   const baseUrl = typeof raw.baseUrl === "string" ? raw.baseUrl.trim().replace(/\/+$/, "") : "";
   const apiKey = typeof raw.apiKey === "string" ? raw.apiKey.trim() : "";
   const modelName = typeof raw.modelName === "string" ? raw.modelName.trim() : "";
+  const imageModelName = typeof raw.imageModelName === "string" ? raw.imageModelName.trim() : "";
 
   if (!baseUrl || baseUrl.length > 300) return { error: "Base URL 无效或过长" };
   if (!modelName || modelName.length > 120) return { error: "Model Name 无效或过长" };
+  if (imageModelName.length > 120) return { error: "Image Model Name 过长" };
   if (apiKey.length > 2048) return { error: "API Key 过长" };
 
   let parsed: URL;
@@ -236,10 +239,10 @@ function parseProvider(value: unknown): { value: ProviderConfig } | { error: str
     return { error: "Base URL 不能指向本机、内网或保留地址" };
   }
 
-  return { value: { baseUrl: parsed.toString().replace(/\/+$/, ""), apiKey, modelName } };
+  return { value: { baseUrl: parsed.toString().replace(/\/+$/, ""), apiKey, modelName, imageModelName } };
 }
 
-function isPrivateHostname(hostname: string) {
+export function isPrivateHostname(hostname: string) {
   const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
   if (
     host === "localhost" ||
