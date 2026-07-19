@@ -32,11 +32,30 @@ type AiIdea = {
 };
 
 type AiResponse = {
-  source: "ai" | "local";
+  source: "ai" | "compatible" | "local";
   notice?: string;
   emotion: string;
   candidates: AiIdea[];
   error?: string;
+};
+
+type ProviderSettings = {
+  baseUrl: string;
+  apiKey: string;
+  modelName: string;
+};
+
+const DEFAULT_PROVIDER: ProviderSettings = {
+  baseUrl: "https://api.openai.com/v1",
+  apiKey: "",
+  modelName: "gpt-5.6-sol",
+};
+
+const PROVIDER_STORAGE = {
+  enabled: "geng-yixia-provider-enabled",
+  baseUrl: "geng-yixia-provider-base-url",
+  modelName: "geng-yixia-provider-model-name",
+  apiKey: "geng-yixia-provider-api-key",
 };
 
 const PALETTES = {
@@ -170,10 +189,17 @@ export default function Home() {
   const [aiTone, setAiTone] = useState("natural");
   const [aiIdeas, setAiIdeas] = useState<AiIdea[]>([]);
   const [aiEmotion, setAiEmotion] = useState("");
-  const [aiSource, setAiSource] = useState<"ai" | "local" | "">("");
+  const [aiSource, setAiSource] = useState<"ai" | "compatible" | "local" | "">("");
   const [aiNotice, setAiNotice] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [useCustomProvider, setUseCustomProvider] = useState(false);
+  const [providerSettings, setProviderSettings] = useState<ProviderSettings>(DEFAULT_PROVIDER);
+  const [draftSettings, setDraftSettings] = useState<ProviderSettings>(DEFAULT_PROVIDER);
+  const [draftEnabled, setDraftEnabled] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [settingsError, setSettingsError] = useState("");
 
   const [videoUrl, setVideoUrl] = useState("");
   const [videoName, setVideoName] = useState("");
@@ -287,6 +313,31 @@ export default function Home() {
   }, [fontId, paintMeme]);
 
   useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const saved: ProviderSettings = {
+        baseUrl: localStorage.getItem(PROVIDER_STORAGE.baseUrl) || DEFAULT_PROVIDER.baseUrl,
+        apiKey: sessionStorage.getItem(PROVIDER_STORAGE.apiKey) || "",
+        modelName: localStorage.getItem(PROVIDER_STORAGE.modelName) || DEFAULT_PROVIDER.modelName,
+      };
+      const enabled = localStorage.getItem(PROVIDER_STORAGE.enabled) === "true";
+      setProviderSettings(saved);
+      setDraftSettings(saved);
+      setUseCustomProvider(enabled);
+      setDraftEnabled(enabled);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSettingsOpen(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [settingsOpen]);
+
+  useEffect(() => {
     return () => {
       if (videoUrl) URL.revokeObjectURL(videoUrl);
       if (gifUrl) URL.revokeObjectURL(gifUrl);
@@ -367,6 +418,64 @@ export default function Home() {
     setUploadName("");
   };
 
+  const openSettings = () => {
+    setDraftSettings(providerSettings);
+    setDraftEnabled(useCustomProvider);
+    setSettingsError("");
+    setShowApiKey(false);
+    setSettingsOpen(true);
+  };
+
+  const saveSettings = () => {
+    const baseUrl = draftSettings.baseUrl.trim().replace(/\/+$/, "");
+    const modelName = draftSettings.modelName.trim();
+
+    if (draftEnabled) {
+      try {
+        const parsed = new URL(baseUrl);
+        if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
+          throw new Error();
+        }
+      } catch {
+        setSettingsError("Base URL 必须是有效的 HTTPS 地址");
+        return;
+      }
+      if (!modelName) {
+        setSettingsError("请填写 Model Name");
+        return;
+      }
+    }
+
+    const nextSettings = {
+      baseUrl: baseUrl || DEFAULT_PROVIDER.baseUrl,
+      apiKey: draftSettings.apiKey.trim(),
+      modelName: modelName || DEFAULT_PROVIDER.modelName,
+    };
+    setProviderSettings(nextSettings);
+    setUseCustomProvider(draftEnabled);
+    localStorage.setItem(PROVIDER_STORAGE.enabled, String(draftEnabled));
+    localStorage.setItem(PROVIDER_STORAGE.baseUrl, nextSettings.baseUrl);
+    localStorage.setItem(PROVIDER_STORAGE.modelName, nextSettings.modelName);
+    if (nextSettings.apiKey) {
+      sessionStorage.setItem(PROVIDER_STORAGE.apiKey, nextSettings.apiKey);
+    } else {
+      sessionStorage.removeItem(PROVIDER_STORAGE.apiKey);
+    }
+    setSettingsOpen(false);
+  };
+
+  const resetSettings = () => {
+    setDraftSettings(DEFAULT_PROVIDER);
+    setDraftEnabled(false);
+    setProviderSettings(DEFAULT_PROVIDER);
+    setUseCustomProvider(false);
+    Object.values(PROVIDER_STORAGE).forEach((key) => {
+      localStorage.removeItem(key);
+      sessionStorage.removeItem(key);
+    });
+    setSettingsError("");
+  };
+
   const generateFromFeeling = async () => {
     if (feeling.trim().length < 2 || aiLoading) return;
     setAiLoading(true);
@@ -377,7 +486,11 @@ export default function Home() {
       const response = await fetch("/api/generate-meme", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ feeling: feeling.trim(), tone: aiTone }),
+        body: JSON.stringify({
+          feeling: feeling.trim(),
+          tone: aiTone,
+          ...(useCustomProvider ? { provider: providerSettings } : {}),
+        }),
       });
       const data = (await response.json()) as AiResponse;
       if (!response.ok || data.error) throw new Error(data.error || "生成失败，请稍后再试");
@@ -518,7 +631,14 @@ export default function Home() {
           <span className="brand-face" aria-hidden="true">:D</span>
           <span>梗一下</span>
         </a>
-        <div className="header-note"><span className="privacy-dot" /> 素材本地处理 · AI 只读你的心情</div>
+        <div className="header-actions">
+          <div className="header-note"><span className="privacy-dot" /> 素材本地处理 · 密钥不落盘</div>
+          <button className="settings-button" type="button" onClick={openSettings}>
+            <span aria-hidden="true">⚙</span>
+            <span>AI 设置</span>
+            <small>{useCustomProvider ? providerSettings.modelName : "站点默认"}</small>
+          </button>
+        </div>
       </header>
 
       <section className="hero" id="top">
@@ -605,12 +725,16 @@ export default function Home() {
                     {aiLoading ? "AI 正在琢磨你的心情…" : "AI 帮我出三套梗"}
                     <span aria-hidden="true">→</span>
                   </button>
+                  <button className="provider-shortcut" type="button" onClick={openSettings}>
+                    当前：{useCustomProvider ? `${providerSettings.modelName} · 自定义接口` : "站点默认接口"}
+                    <span>切换 →</span>
+                  </button>
                   {aiError && <p className="error-message">{aiError}</p>}
 
                   {aiIdeas.length > 0 && (
                     <div className="ai-results">
                       <div className="ai-results-title">
-                        <span>{aiSource === "ai" ? "AI 已接住" : "灵感已接住"} · {aiEmotion}</span>
+                        <span>{aiSource === "local" ? "灵感已接住" : "AI 已接住"} · {aiEmotion}</span>
                         <small>点一套换上</small>
                       </div>
                       <div className="idea-list">
@@ -800,7 +924,7 @@ export default function Home() {
               {gifUrl ? (
                 <>
                   <div className="gif-result-meta"><span>生成成功 ✓</span><b>{fileSizeLabel(gifBytes)}</b></div>
-                  <a className="button primary full-button" href={gifUrl} download={`梗一下-${Date.now()}.gif`}>下载 GIF <span>↓</span></a>
+                  <a className="button primary full-button" href={gifUrl} download="梗一下.gif">下载 GIF <span>↓</span></a>
                   <button className="text-button" onClick={() => { URL.revokeObjectURL(gifUrl); setGifUrl(""); setProgress(0); }}>调整参数重新生成</button>
                 </>
               ) : (
@@ -818,6 +942,89 @@ export default function Home() {
       </section>
 
       <footer><span>梗一下 · 让每句话都有表情</span><small>Made for 灵感爆发的那一刻</small></footer>
+
+      {settingsOpen && (
+        <div className="settings-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setSettingsOpen(false);
+        }}>
+          <section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+            <div className="settings-header">
+              <div>
+                <p>OPENAI COMPATIBLE</p>
+                <h2 id="settings-title">AI 接口设置</h2>
+              </div>
+              <button type="button" onClick={() => setSettingsOpen(false)} aria-label="关闭设置">×</button>
+            </div>
+
+            <label className="settings-toggle">
+              <span><b>使用自定义接口</b><small>关闭时使用站点默认服务</small></span>
+              <input type="checkbox" checked={draftEnabled} onChange={(event) => setDraftEnabled(event.target.checked)} />
+              <i aria-hidden="true" />
+            </label>
+
+            <div className={`settings-fields ${draftEnabled ? "" : "disabled"}`}>
+              <label className="settings-field">
+                <span>Base URL</span>
+                <input
+                  type="url"
+                  value={draftSettings.baseUrl}
+                  onChange={(event) => setDraftSettings((current) => ({ ...current, baseUrl: event.target.value }))}
+                  placeholder="https://api.openai.com/v1"
+                  disabled={!draftEnabled}
+                  autoCapitalize="none"
+                  spellCheck={false}
+                />
+                <small>填写 API 根地址，通常以 /v1 结尾</small>
+              </label>
+
+              <label className="settings-field">
+                <span>API Key</span>
+                <div className="api-key-wrap">
+                  <input
+                    type={showApiKey ? "text" : "password"}
+                    value={draftSettings.apiKey}
+                    onChange={(event) => setDraftSettings((current) => ({ ...current, apiKey: event.target.value }))}
+                    placeholder="sk-..."
+                    disabled={!draftEnabled}
+                    autoComplete="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                  />
+                  <button type="button" onClick={() => setShowApiKey((visible) => !visible)} disabled={!draftEnabled}>
+                    {showApiKey ? "隐藏" : "显示"}
+                  </button>
+                </div>
+                <small>仅保存在当前浏览器会话；无鉴权的兼容接口可留空</small>
+              </label>
+
+              <label className="settings-field">
+                <span>Model Name</span>
+                <input
+                  type="text"
+                  value={draftSettings.modelName}
+                  onChange={(event) => setDraftSettings((current) => ({ ...current, modelName: event.target.value }))}
+                  placeholder="gpt-5.6-sol"
+                  disabled={!draftEnabled}
+                  autoCapitalize="none"
+                  spellCheck={false}
+                />
+                <small>使用服务商提供的准确模型 ID</small>
+              </label>
+            </div>
+
+            <div className="settings-security">
+              <span aria-hidden="true">⌁</span>
+              <p><b>密钥如何使用？</b><br />生成时经本站临时转发到你填写的接口，不写入源码、日志或数据库。关闭浏览器会话后自动清除。</p>
+            </div>
+            {settingsError && <p className="settings-error">{settingsError}</p>}
+
+            <div className="settings-actions">
+              <button className="reset-settings" type="button" onClick={resetSettings}>恢复默认</button>
+              <button className="button primary" type="button" onClick={saveSettings}>保存设置 <span>✓</span></button>
+            </div>
+          </section>
+        </div>
+      )}
     </main>
   );
 }

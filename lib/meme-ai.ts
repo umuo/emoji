@@ -17,6 +17,12 @@ type MemeAiResult = {
   candidates: MemeIdea[];
 };
 
+type ProviderConfig = {
+  baseUrl: string;
+  apiKey: string;
+  modelName: string;
+};
+
 const toneNames: Record<string, string> = {
   natural: "自然吐槽",
   work: "打工人",
@@ -27,6 +33,39 @@ const toneNames: Record<string, string> = {
 
 const jsonHeaders = { "content-type": "application/json; charset=utf-8" };
 
+const SYSTEM_PROMPT =
+  "你是很懂中文互联网语感的表情包导演。根据用户的真实感受，生成三套可以直接发到聊天里的梗图方案。上方文案负责交代场景，下方文案负责包袱或情绪落点；每段不超过18个汉字，口语自然、不要鸡汤、不要解释。三套要明显不同：一套克制、一套夸张、一套意外反转。不得输出仇恨、威胁、歧视或针对个人的恶毒攻击。emoji 只放一个表情；palette 和 fontId 必须从给定枚举中选择。只返回符合要求的 JSON 对象，不要 Markdown。";
+
+const MEME_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    emotion: { type: "string", description: "4到8个字的中文情绪标签" },
+    candidates: {
+      type: "array",
+      minItems: 3,
+      maxItems: 3,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          label: { type: "string", description: "2到5个字的方案名" },
+          top: { type: "string" },
+          bottom: { type: "string" },
+          emoji: { type: "string" },
+          palette: { type: "string", enum: ["sunset", "mint", "violet", "pink", "ice", "lime"] },
+          fontId: { type: "string", enum: ["fun", "bold", "impact", "round", "song", "kai", "hand", "mono"] },
+        },
+        required: ["label", "top", "bottom", "emoji", "palette", "fontId"],
+      },
+    },
+  },
+  required: ["emotion", "candidates"],
+} as const;
+
+const palettes = new Set<MemeIdea["palette"]>(["sunset", "mint", "violet", "pink", "ice", "lime"]);
+const fontIds = new Set<MemeIdea["fontId"]>(["fun", "bold", "impact", "round", "song", "kai", "hand", "mono"]);
+
 export async function handleGenerateMeme(request: Request, env: MemeAiEnv): Promise<Response> {
   if (request.method !== "POST") {
     return new Response(JSON.stringify({ error: "只支持 POST 请求" }), {
@@ -35,9 +74,9 @@ export async function handleGenerateMeme(request: Request, env: MemeAiEnv): Prom
     });
   }
 
-  let body: { feeling?: unknown; tone?: unknown };
+  let body: { feeling?: unknown; tone?: unknown; provider?: unknown };
   try {
-    body = (await request.json()) as { feeling?: unknown; tone?: unknown };
+    body = (await request.json()) as { feeling?: unknown; tone?: unknown; provider?: unknown };
   } catch {
     return new Response(JSON.stringify({ error: "请求内容不是有效 JSON" }), {
       status: 400,
@@ -52,6 +91,34 @@ export async function handleGenerateMeme(request: Request, env: MemeAiEnv): Prom
       status: 400,
       headers: jsonHeaders,
     });
+  }
+
+  if (body.provider !== undefined) {
+    const provider = parseProvider(body.provider);
+    if ("error" in provider) {
+      return new Response(JSON.stringify({ error: provider.error }), {
+        status: 400,
+        headers: jsonHeaders,
+      });
+    }
+
+    try {
+      const result = await generateWithCompatibleProvider(feeling, tone, provider.value);
+      return new Response(
+        JSON.stringify({
+          source: "compatible",
+          notice: `由 ${provider.value.modelName} 生成 · 使用自定义接口`,
+          ...result,
+        }),
+        { headers: jsonHeaders },
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "自定义 AI 接口连接失败";
+      return new Response(JSON.stringify({ error: message }), {
+        status: 502,
+        headers: jsonHeaders,
+      });
+    }
   }
 
   if (!env.OPENAI_API_KEY) {
@@ -87,8 +154,7 @@ export async function handleGenerateMeme(request: Request, env: MemeAiEnv): Prom
             content: [
               {
                 type: "input_text",
-                text:
-                  "你是很懂中文互联网语感的表情包导演。根据用户的真实感受，生成三套可以直接发到聊天里的梗图方案。上方文案负责交代场景，下方文案负责包袱或情绪落点；每段不超过18个汉字，口语自然、不要鸡汤、不要解释。三套要明显不同：一套克制、一套夸张、一套意外反转。不得输出仇恨、威胁、歧视或针对个人的恶毒攻击。emoji 只放一个表情；palette 和 fontId 必须从给定枚举中选择。",
+                text: SYSTEM_PROMPT,
               },
             ],
           },
@@ -107,38 +173,7 @@ export async function handleGenerateMeme(request: Request, env: MemeAiEnv): Prom
             type: "json_schema",
             name: "meme_ideas",
             strict: true,
-            schema: {
-              type: "object",
-              additionalProperties: false,
-              properties: {
-                emotion: { type: "string", description: "4到8个字的中文情绪标签" },
-                candidates: {
-                  type: "array",
-                  minItems: 3,
-                  maxItems: 3,
-                  items: {
-                    type: "object",
-                    additionalProperties: false,
-                    properties: {
-                      label: { type: "string", description: "2到5个字的方案名" },
-                      top: { type: "string" },
-                      bottom: { type: "string" },
-                      emoji: { type: "string" },
-                      palette: {
-                        type: "string",
-                        enum: ["sunset", "mint", "violet", "pink", "ice", "lime"],
-                      },
-                      fontId: {
-                        type: "string",
-                        enum: ["fun", "bold", "impact", "round", "song", "kai", "hand", "mono"],
-                      },
-                    },
-                    required: ["label", "top", "bottom", "emoji", "palette", "fontId"],
-                  },
-                },
-              },
-              required: ["emotion", "candidates"],
-            },
+            schema: MEME_SCHEMA,
           },
         },
       }),
@@ -156,10 +191,7 @@ export async function handleGenerateMeme(request: Request, env: MemeAiEnv): Prom
       .find((item) => item.type === "output_text")?.text;
     if (!outputText) throw new Error("OpenAI response did not include output text");
 
-    const parsed = JSON.parse(outputText) as MemeAiResult;
-    if (!Array.isArray(parsed.candidates) || parsed.candidates.length !== 3) {
-      throw new Error("OpenAI response did not match the expected shape");
-    }
+    const parsed = parseMemeResult(outputText);
 
     return new Response(JSON.stringify({ source: "ai", ...parsed }), { headers: jsonHeaders });
   } catch {
@@ -174,6 +206,208 @@ export async function handleGenerateMeme(request: Request, env: MemeAiEnv): Prom
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function parseProvider(value: unknown): { value: ProviderConfig } | { error: string } {
+  if (!value || typeof value !== "object") return { error: "自定义接口设置不完整" };
+  const raw = value as Record<string, unknown>;
+  const baseUrl = typeof raw.baseUrl === "string" ? raw.baseUrl.trim().replace(/\/+$/, "") : "";
+  const apiKey = typeof raw.apiKey === "string" ? raw.apiKey.trim() : "";
+  const modelName = typeof raw.modelName === "string" ? raw.modelName.trim() : "";
+
+  if (!baseUrl || baseUrl.length > 300) return { error: "Base URL 无效或过长" };
+  if (!modelName || modelName.length > 120) return { error: "Model Name 无效或过长" };
+  if (apiKey.length > 2048) return { error: "API Key 过长" };
+
+  let parsed: URL;
+  try {
+    parsed = new URL(baseUrl);
+  } catch {
+    return { error: "Base URL 不是有效网址" };
+  }
+  if (parsed.protocol !== "https:") return { error: "Base URL 仅支持 HTTPS" };
+  if (parsed.username || parsed.password || parsed.search || parsed.hash) {
+    return { error: "Base URL 不能包含账号、查询参数或锚点" };
+  }
+  if (isPrivateHostname(parsed.hostname)) {
+    return { error: "Base URL 不能指向本机、内网或保留地址" };
+  }
+
+  return { value: { baseUrl: parsed.toString().replace(/\/+$/, ""), apiKey, modelName } };
+}
+
+function isPrivateHostname(hostname: string) {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".local") ||
+    host.endsWith(".internal") ||
+    host.endsWith(".nip.io") ||
+    host.endsWith(".sslip.io") ||
+    host.endsWith(".xip.io") ||
+    host === "0.0.0.0" ||
+    host === "::" ||
+    host === "::1" ||
+    host.startsWith("fc") ||
+    host.startsWith("fd") ||
+    host.startsWith("fe8") ||
+    host.startsWith("fe9") ||
+    host.startsWith("fea") ||
+    host.startsWith("feb")
+  ) return true;
+
+  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!ipv4) return false;
+  const octets = ipv4.slice(1).map(Number);
+  if (octets.some((part) => part > 255)) return true;
+  return (
+    octets[0] === 0 ||
+    octets[0] === 10 ||
+    octets[0] === 127 ||
+    (octets[0] === 169 && octets[1] === 254) ||
+    (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+    (octets[0] === 192 && octets[1] === 168) ||
+    octets[0] >= 224
+  );
+}
+
+async function generateWithCompatibleProvider(feeling: string, tone: string, provider: ProviderConfig) {
+  const endpoint = provider.baseUrl.endsWith("/chat/completions")
+    ? provider.baseUrl
+    : `${provider.baseUrl}/chat/completions`;
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (provider.apiKey) headers.authorization = `Bearer ${provider.apiKey}`;
+
+  const baseBody = {
+    model: provider.modelName,
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content: `我的感受：${feeling}\n希望风格：${toneNames[tone]}` },
+    ],
+  };
+  const formats: Array<Record<string, unknown> | null> = [
+    { type: "json_schema", json_schema: { name: "meme_ideas", strict: true, schema: MEME_SCHEMA } },
+    { type: "json_object" },
+    null,
+  ];
+
+  let lastError = "接口没有返回有效结果";
+  for (const format of formats) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 22000);
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers,
+        redirect: "error",
+        signal: controller.signal,
+        body: JSON.stringify({ ...baseBody, ...(format ? { response_format: format } : {}) }),
+      });
+      if (!response.ok) {
+        const details = await readProviderError(response, provider.apiKey);
+        lastError = `接口返回 ${response.status}${details ? `：${details}` : ""}`;
+        if (![400, 415, 422].includes(response.status)) break;
+        continue;
+      }
+
+      const payload = (await response.json()) as {
+        choices?: Array<{ message?: { content?: unknown } }>;
+      };
+      const content = readChatContent(payload.choices?.[0]?.message?.content);
+      if (!content) {
+        lastError = "接口响应中没有 choices[0].message.content";
+        continue;
+      }
+      return parseMemeResult(content);
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new Error("自定义 AI 接口响应超时，请检查 Base URL 或稍后重试");
+      }
+      throw new Error(error instanceof Error ? `自定义 AI 接口连接失败：${error.message}` : "自定义 AI 接口连接失败");
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  throw new Error(lastError);
+}
+
+async function readProviderError(response: Response, apiKey: string) {
+  try {
+    const text = (await response.text()).slice(0, 800);
+    const parsed = JSON.parse(text) as { error?: { message?: unknown } | string; message?: unknown };
+    const message = typeof parsed.error === "string"
+      ? parsed.error
+      : typeof parsed.error?.message === "string"
+        ? parsed.error.message
+        : typeof parsed.message === "string"
+          ? parsed.message
+          : "";
+    const safeMessage = apiKey ? message.replaceAll(apiKey, "[REDACTED]") : message;
+    return safeMessage.replace(/[\r\n\t]+/g, " ").slice(0, 180);
+  } catch {
+    return "";
+  }
+}
+
+function readChatContent(content: unknown) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) => {
+      if (!part || typeof part !== "object") return "";
+      const value = (part as Record<string, unknown>).text;
+      return typeof value === "string" ? value : "";
+    })
+    .join("");
+}
+
+function parseMemeResult(raw: string): MemeAiResult {
+  const withoutFence = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  const firstBrace = withoutFence.indexOf("{");
+  const lastBrace = withoutFence.lastIndexOf("}");
+  const json = firstBrace >= 0 && lastBrace > firstBrace
+    ? withoutFence.slice(firstBrace, lastBrace + 1)
+    : withoutFence;
+  let value: unknown;
+  try {
+    value = JSON.parse(json);
+  } catch {
+    throw new Error("接口返回的内容不是有效 JSON");
+  }
+  if (!value || typeof value !== "object") throw new Error("接口返回的数据格式不正确");
+  const object = value as Record<string, unknown>;
+  if (typeof object.emotion !== "string" || !Array.isArray(object.candidates) || object.candidates.length !== 3) {
+    throw new Error("接口没有按要求返回三套表情包文案");
+  }
+
+  const candidates = object.candidates.map((candidate) => {
+    if (!candidate || typeof candidate !== "object") throw new Error("表情包方案格式不正确");
+    const item = candidate as Record<string, unknown>;
+    if (
+      typeof item.label !== "string" ||
+      typeof item.top !== "string" ||
+      typeof item.bottom !== "string" ||
+      typeof item.emoji !== "string" ||
+      typeof item.palette !== "string" ||
+      typeof item.fontId !== "string" ||
+      !palettes.has(item.palette as MemeIdea["palette"]) ||
+      !fontIds.has(item.fontId as MemeIdea["fontId"])
+    ) throw new Error("表情包方案缺少必需字段");
+    return {
+      label: item.label.trim().slice(0, 10),
+      top: item.top.trim().slice(0, 40),
+      bottom: item.bottom.trim().slice(0, 40),
+      emoji: Array.from(item.emoji.trim() || "😶").slice(0, 3).join(""),
+      palette: item.palette as MemeIdea["palette"],
+      fontId: item.fontId as MemeIdea["fontId"],
+    };
+  });
+
+  if (candidates.some((item) => !item.label || !item.top || !item.bottom)) {
+    throw new Error("表情包文案不能为空");
+  }
+  return { emotion: object.emotion.trim().slice(0, 16), candidates };
 }
 
 function createLocalIdeas(feeling: string, tone: string): MemeAiResult {
