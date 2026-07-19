@@ -362,6 +362,185 @@ main {
   line-height: 1;
 }
 
+.feeling-field {
+  position: relative;
+}
+
+.feeling-field textarea {
+  width: 100%;
+  min-height: 112px;
+  padding: 16px 18px 28px;
+  resize: vertical;
+  background: #fff9e7;
+  border: 2px solid var(--ink);
+  border-radius: 8px;
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.55;
+  box-shadow: 4px 4px 0 var(--yellow);
+}
+
+.feeling-field textarea:focus {
+  outline: none;
+  box-shadow: 5px 5px 0 var(--orange);
+}
+
+.feeling-field > span {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  color: #918c80;
+  font-family: monospace;
+  font-size: 9px;
+}
+
+.feeling-examples {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.feeling-examples button {
+  padding: 5px 8px;
+  background: transparent;
+  border: 1px solid #aaa69d;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 750;
+}
+
+.feeling-examples button:hover {
+  background: var(--white);
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.mini-label {
+  margin: 18px 0 8px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .05em;
+}
+
+.tone-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.tone-grid button {
+  padding: 8px 10px;
+  background: #f2eee4;
+  border: 1.5px solid #aaa69d;
+  border-radius: 5px;
+  color: #5d5951;
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.tone-grid button.selected {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--white);
+  box-shadow: 2px 2px 0 var(--yellow);
+}
+
+.ai-generate-button {
+  width: 100%;
+  margin-top: 18px;
+  justify-content: space-between;
+  background: var(--orange);
+  color: var(--white);
+  box-shadow: 4px 4px 0 var(--ink);
+}
+
+.ai-generate-button .sparkle {
+  font-size: 20px;
+}
+
+.ai-results {
+  margin-top: 22px;
+  padding: 15px;
+  background: #eef9f6;
+  border: 2px solid var(--ink);
+  border-radius: 8px;
+}
+
+.ai-results-title {
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ai-results-title span {
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.ai-results-title small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.idea-list {
+  display: grid;
+  gap: 7px;
+}
+
+.idea-list button {
+  min-width: 0;
+  padding: 9px;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  background: var(--white);
+  border: 1.5px solid #aaa69d;
+  border-radius: 6px;
+  color: var(--ink);
+  text-align: left;
+}
+
+.idea-list button.selected {
+  border-color: var(--ink);
+  box-shadow: 3px 3px 0 var(--mint);
+}
+
+.idea-emoji {
+  font-size: 27px;
+}
+
+.idea-list b,
+.idea-list small {
+  display: block;
+}
+
+.idea-list b {
+  margin-bottom: 3px;
+  font-size: 10px;
+}
+
+.idea-list small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-notice {
+  margin: 11px 0 0;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
 .divider {
   height: 1px;
   margin: 26px 0;
@@ -415,6 +594,52 @@ main {
   grid-template-columns: 1fr 50px 50px;
   gap: 10px;
   align-items: end;
+}
+
+.font-label {
+  margin-top: 16px;
+}
+
+.font-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.font-grid button {
+  min-width: 0;
+  min-height: 54px;
+  padding: 7px 4px 5px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #f2eee4;
+  border: 1.5px solid transparent;
+  border-radius: 5px;
+  color: var(--ink);
+}
+
+.font-grid button.selected {
+  background: #fff7d8;
+  border-color: var(--ink);
+  box-shadow: 2px 2px 0 var(--ink);
+}
+
+.font-grid button > span {
+  width: 100%;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.font-grid button small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-family: Arial, "PingFang SC", sans-serif;
+  font-size: 8px;
+  font-weight: 700;
 }
 
 .style-row label > span,
@@ -915,6 +1140,15 @@ footer small {
 
   .template-card small {
     display: none;
+  }
+
+  .font-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .feeling-field textarea {
+    min-height: 96px;
+    font-size: 16px;
   }
 
   .preview-panel {

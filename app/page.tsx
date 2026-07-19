@@ -2,7 +2,7 @@
 
 import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-type EditorMode = "meme" | "gif";
+type EditorMode = "ai" | "meme" | "gif";
 
 type MemeTemplate = {
   id: string;
@@ -13,6 +13,51 @@ type MemeTemplate = {
   defaultTop: string;
   defaultBottom: string;
 };
+
+type FontOption = {
+  id: "fun" | "bold" | "impact" | "round" | "song" | "kai" | "hand" | "mono";
+  name: string;
+  sample: string;
+  family: string;
+  weight: number;
+};
+
+type AiIdea = {
+  label: string;
+  top: string;
+  bottom: string;
+  emoji: string;
+  palette: keyof typeof PALETTES;
+  fontId: FontOption["id"];
+};
+
+type AiResponse = {
+  source: "ai" | "local";
+  notice?: string;
+  emotion: string;
+  candidates: AiIdea[];
+  error?: string;
+};
+
+const PALETTES = {
+  sunset: { background: ["#ffdf63", "#ff6b46"] as [string, string], accent: "#171714" },
+  mint: { background: ["#8cd8ca", "#d9f5ef"] as [string, string], accent: "#163a34" },
+  violet: { background: ["#b9a7ff", "#7358ff"] as [string, string], accent: "#ffffff" },
+  pink: { background: ["#ff8fb1", "#ffd4e0"] as [string, string], accent: "#5b1730" },
+  ice: { background: ["#a7dcff", "#edf8ff"] as [string, string], accent: "#17425b" },
+  lime: { background: ["#d5ef62", "#8cd8ca"] as [string, string], accent: "#24320f" },
+};
+
+const FONT_OPTIONS: FontOption[] = [
+  { id: "fun", name: "快乐体", sample: "我真服了", family: "'ZCOOL KuaiLe', 'PingFang SC', sans-serif", weight: 400 },
+  { id: "bold", name: "爆梗黑", sample: "笑不活了", family: "'Arial Black', 'PingFang SC', 'Microsoft YaHei', sans-serif", weight: 900 },
+  { id: "impact", name: "综艺体", sample: "离大谱", family: "Impact, 'Heiti SC', 'Microsoft YaHei', sans-serif", weight: 900 },
+  { id: "round", name: "可爱圆", sample: "好耶好耶", family: "'Arial Rounded MT Bold', 'Yuanti SC', 'Microsoft YaHei', sans-serif", weight: 800 },
+  { id: "song", name: "报纸宋", sample: "震惊一下", family: "'Songti SC', SimSun, serif", weight: 800 },
+  { id: "kai", name: "认真楷", sample: "淡定一点", family: "'Kaiti SC', KaiTi, serif", weight: 700 },
+  { id: "hand", name: "潇洒手写", sample: "随它去吧", family: "'Xingkai SC', STXingkai, cursive", weight: 700 },
+  { id: "mono", name: "故障等宽", sample: "加载失败", family: "'Courier New', 'Microsoft YaHei', monospace", weight: 900 },
+];
 
 const TEMPLATES: MemeTemplate[] = [
   {
@@ -107,17 +152,28 @@ function fileSizeLabel(bytes: number) {
 }
 
 export default function Home() {
-  const [mode, setMode] = useState<EditorMode>("meme");
+  const [mode, setMode] = useState<EditorMode>("ai");
   const [templateId, setTemplateId] = useState(TEMPLATES[0].id);
   const [topText, setTopText] = useState(TEMPLATES[0].defaultTop);
   const [bottomText, setBottomText] = useState(TEMPLATES[0].defaultBottom);
   const [fontSize, setFontSize] = useState(64);
   const [textColor, setTextColor] = useState("#ffffff");
   const [outlineColor, setOutlineColor] = useState("#111111");
+  const [fontId, setFontId] = useState<FontOption["id"]>("bold");
+  const [aiVisual, setAiVisual] = useState<MemeTemplate | null>(null);
   const [uploadedImage, setUploadedImage] = useState<HTMLImageElement | null>(null);
   const [uploadName, setUploadName] = useState("");
   const [copyStatus, setCopyStatus] = useState("复制图片");
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  const [feeling, setFeeling] = useState("我真服了。。。");
+  const [aiTone, setAiTone] = useState("natural");
+  const [aiIdeas, setAiIdeas] = useState<AiIdea[]>([]);
+  const [aiEmotion, setAiEmotion] = useState("");
+  const [aiSource, setAiSource] = useState<"ai" | "local" | "">("");
+  const [aiNotice, setAiNotice] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
 
   const [videoUrl, setVideoUrl] = useState("");
   const [videoName, setVideoName] = useState("");
@@ -133,10 +189,12 @@ export default function Home() {
   const [gifError, setGifError] = useState("");
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  const selectedTemplate = useMemo(
+  const manualTemplate = useMemo(
     () => TEMPLATES.find((template) => template.id === templateId) ?? TEMPLATES[0],
     [templateId],
   );
+  const selectedTemplate = aiVisual ?? manualTemplate;
+  const selectedFont = FONT_OPTIONS.find((font) => font.id === fontId) ?? FONT_OPTIONS[0];
 
   const paintMeme = useCallback(() => {
     const canvas = canvasRef.current;
@@ -185,7 +243,7 @@ export default function Home() {
     }
 
     const drawText = (text: string, anchorY: number, fromBottom = false) => {
-      context.font = `900 ${fontSize}px Arial, PingFang SC, Microsoft YaHei, sans-serif`;
+      context.font = `${selectedFont.weight} ${fontSize}px ${selectedFont.family}`;
       context.textAlign = "center";
       context.textBaseline = "middle";
       context.lineJoin = "round";
@@ -217,11 +275,16 @@ export default function Home() {
     context.strokeText("梗一下 · 本地创作", size - 24, size - 20);
     context.fillText("梗一下 · 本地创作", size - 24, size - 20);
     context.restore();
-  }, [bottomText, fontSize, outlineColor, selectedTemplate, textColor, topText, uploadedImage]);
+  }, [bottomText, fontSize, outlineColor, selectedFont, selectedTemplate, textColor, topText, uploadedImage]);
 
   useEffect(() => {
     paintMeme();
   }, [paintMeme]);
+
+  useEffect(() => {
+    if (typeof document === "undefined" || !document.fonts) return;
+    document.fonts.ready.then(() => paintMeme());
+  }, [fontId, paintMeme]);
 
   useEffect(() => {
     return () => {
@@ -232,6 +295,7 @@ export default function Home() {
 
   const pickTemplate = (template: MemeTemplate) => {
     setTemplateId(template.id);
+    setAiVisual(null);
     setTopText(template.defaultTop);
     setBottomText(template.defaultBottom);
     setUploadedImage(null);
@@ -244,6 +308,7 @@ export default function Home() {
     const objectUrl = URL.createObjectURL(file);
     const image = new Image();
     image.onload = () => {
+      setAiVisual(null);
       setUploadedImage(image);
       setUploadName(file.name);
       URL.revokeObjectURL(objectUrl);
@@ -282,6 +347,53 @@ export default function Home() {
       }
       setTimeout(() => setCopyStatus("复制图片"), 1800);
     }, "image/png");
+  };
+
+  const applyAiIdea = (idea: AiIdea, index: number) => {
+    const palette = PALETTES[idea.palette] ?? PALETTES.sunset;
+    setAiVisual({
+      id: `ai-${index}`,
+      name: idea.label,
+      emoji: Array.from(idea.emoji || "😶").slice(0, 3).join(""),
+      background: palette.background,
+      accent: palette.accent,
+      defaultTop: idea.top,
+      defaultBottom: idea.bottom,
+    });
+    setTopText(idea.top.slice(0, 40));
+    setBottomText(idea.bottom.slice(0, 40));
+    setFontId(idea.fontId);
+    setUploadedImage(null);
+    setUploadName("");
+  };
+
+  const generateFromFeeling = async () => {
+    if (feeling.trim().length < 2 || aiLoading) return;
+    setAiLoading(true);
+    setAiError("");
+    setAiNotice("");
+
+    try {
+      const response = await fetch("/api/generate-meme", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ feeling: feeling.trim(), tone: aiTone }),
+      });
+      const data = (await response.json()) as AiResponse;
+      if (!response.ok || data.error) throw new Error(data.error || "生成失败，请稍后再试");
+      if (!Array.isArray(data.candidates) || !data.candidates.length) {
+        throw new Error("这次没接住情绪，再试一次吧");
+      }
+      setAiIdeas(data.candidates);
+      setAiEmotion(data.emotion);
+      setAiSource(data.source);
+      setAiNotice(data.notice || "");
+      applyAiIdea(data.candidates[0], 0);
+    } catch (error) {
+      setAiError(error instanceof Error ? error.message : "生成失败，请稍后再试");
+    } finally {
+      setAiLoading(false);
+    }
   };
 
   const loadVideo = (event: ChangeEvent<HTMLInputElement>) => {
@@ -406,7 +518,7 @@ export default function Home() {
           <span className="brand-face" aria-hidden="true">:D</span>
           <span>梗一下</span>
         </a>
-        <div className="header-note"><span className="privacy-dot" /> 图片和视频不会离开你的设备</div>
+        <div className="header-note"><span className="privacy-dot" /> 素材本地处理 · AI 只读你的心情</div>
       </header>
 
       <section className="hero" id="top">
@@ -414,18 +526,26 @@ export default function Home() {
           <p className="eyebrow">30 秒，造个好梗</p>
           <h1>不学 PS，<br /><span>也能做表情包。</span></h1>
         </div>
-        <p className="hero-copy">选模板、加文案、直接发。<br />视频也能一键变成 GIF。</p>
+        <p className="hero-copy">说出现在的感受，AI 帮你接梗。<br />图片和视频也都能自己做。</p>
       </section>
 
       <section className="creator-shell" aria-label="表情包创作工具">
         <div className="mode-tabs" role="tablist" aria-label="选择工具">
+          <button
+            className={mode === "ai" ? "active" : ""}
+            onClick={() => setMode("ai")}
+            role="tab"
+            aria-selected={mode === "ai"}
+          >
+            <span>01</span> AI 心情出图 <b>NEW</b>
+          </button>
           <button
             className={mode === "meme" ? "active" : ""}
             onClick={() => setMode("meme")}
             role="tab"
             aria-selected={mode === "meme"}
           >
-            <span>01</span> 图片表情包
+            <span>02</span> 图片表情包
           </button>
           <button
             className={mode === "gif" ? "active" : ""}
@@ -433,46 +553,119 @@ export default function Home() {
             role="tab"
             aria-selected={mode === "gif"}
           >
-            <span>02</span> 视频转 GIF <b>NEW</b>
+            <span>03</span> 视频转 GIF
           </button>
         </div>
 
-        {mode === "meme" ? (
+        {mode !== "gif" ? (
           <div className="workspace">
             <section className="control-panel" aria-label="编辑设置">
-              <div className="section-heading">
-                <span>1</span>
-                <div><h2>选一张底图</h2><p>热门模板，或者用你自己的</p></div>
-              </div>
+              {mode === "ai" ? (
+                <>
+                  <div className="section-heading">
+                    <span>1</span>
+                    <div><h2>现在是什么感受？</h2><p>越像你平时说话，生成的梗越自然</p></div>
+                  </div>
 
-              <div className="template-grid">
-                {TEMPLATES.map((template) => (
-                  <button
-                    key={template.id}
-                    className={`template-card ${!uploadedImage && template.id === templateId ? "selected" : ""}`}
-                    onClick={() => pickTemplate(template)}
-                    style={{
-                      background: `linear-gradient(135deg, ${template.background[0]}, ${template.background[1]})`,
-                    }}
-                    aria-label={`使用${template.name}模板`}
-                  >
-                    <span>{template.emoji}</span>
-                    <small>{template.name}</small>
+                  <div className="feeling-field">
+                    <textarea
+                      value={feeling}
+                      onChange={(event) => setFeeling(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) generateFromFeeling();
+                      }}
+                      maxLength={120}
+                      placeholder="比如：我真服了。。。"
+                      aria-label="描述当前感受"
+                    />
+                    <span>{feeling.length}/120</span>
+                  </div>
+
+                  <div className="feeling-examples" aria-label="感受示例">
+                    {["我真服了。。。", "累到不想说话", "今天也太爽了吧", "尴尬得想换个星球"].map((example) => (
+                      <button key={example} onClick={() => setFeeling(example)}>{example}</button>
+                    ))}
+                  </div>
+
+                  <p className="mini-label">想要什么语气</p>
+                  <div className="tone-grid">
+                    {[
+                      ["natural", "自然吐槽"],
+                      ["work", "打工人"],
+                      ["cute", "可爱一点"],
+                      ["savage", "嘴替模式"],
+                      ["absurd", "抽象发疯"],
+                    ].map(([id, label]) => (
+                      <button key={id} className={aiTone === id ? "selected" : ""} onClick={() => setAiTone(id)}>{label}</button>
+                    ))}
+                  </div>
+
+                  <button className="button ai-generate-button" onClick={generateFromFeeling} disabled={aiLoading || feeling.trim().length < 2}>
+                    <span className="sparkle" aria-hidden="true">✦</span>
+                    {aiLoading ? "AI 正在琢磨你的心情…" : "AI 帮我出三套梗"}
+                    <span aria-hidden="true">→</span>
                   </button>
-                ))}
-              </div>
+                  {aiError && <p className="error-message">{aiError}</p>}
 
-              <label className={`upload-button ${uploadedImage ? "has-file" : ""}`}>
-                <input type="file" accept="image/jpeg,image/png,image/webp" onChange={loadImage} />
-                <span className="upload-plus">＋</span>
-                <span>{uploadName || "上传自己的图片"}<small>JPG / PNG / WEBP</small></span>
-              </label>
+                  {aiIdeas.length > 0 && (
+                    <div className="ai-results">
+                      <div className="ai-results-title">
+                        <span>{aiSource === "ai" ? "AI 已接住" : "灵感已接住"} · {aiEmotion}</span>
+                        <small>点一套换上</small>
+                      </div>
+                      <div className="idea-list">
+                        {aiIdeas.map((idea, index) => (
+                          <button
+                            key={`${idea.label}-${index}`}
+                            className={aiVisual?.id === `ai-${index}` ? "selected" : ""}
+                            onClick={() => applyAiIdea(idea, index)}
+                          >
+                            <span className="idea-emoji">{idea.emoji}</span>
+                            <span><b>{idea.label}</b><small>{idea.top} / {idea.bottom}</small></span>
+                          </button>
+                        ))}
+                      </div>
+                      {aiNotice && <p className="ai-notice">{aiNotice}</p>}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="section-heading">
+                    <span>1</span>
+                    <div><h2>选一张底图</h2><p>热门模板，或者用你自己的</p></div>
+                  </div>
+
+                  <div className="template-grid">
+                    {TEMPLATES.map((template) => (
+                      <button
+                        key={template.id}
+                        className={`template-card ${!uploadedImage && template.id === templateId ? "selected" : ""}`}
+                        onClick={() => pickTemplate(template)}
+                        style={{
+                          background: `linear-gradient(135deg, ${template.background[0]}, ${template.background[1]})`,
+                        }}
+                        aria-label={`使用${template.name}模板`}
+                      >
+                        <span>{template.emoji}</span>
+                        <small>{template.name}</small>
+                      </button>
+                    ))}
+                  </div>
+
+                  <label className={`upload-button ${uploadedImage ? "has-file" : ""}`}>
+                    <input type="file" accept="image/jpeg,image/png,image/webp" onChange={loadImage} />
+                    <span className="upload-plus">＋</span>
+                    <span>{uploadName || "上传自己的图片"}<small>JPG / PNG / WEBP</small></span>
+                  </label>
+                </>
+              )}
 
               <div className="divider" />
 
               <div className="section-heading compact">
                 <span>2</span>
-                <div><h2>写点什么</h2><p>文案会自动换行</p></div>
+                <div><h2>{mode === "ai" ? "不满意就自己改" : "写点什么"}</h2><p>文案和字体都会实时更新</p></div>
               </div>
 
               <label className="field-label" htmlFor="top-copy">上方文字</label>
@@ -485,6 +678,21 @@ export default function Home() {
               <div className="text-field-wrap">
                 <textarea id="bottom-copy" value={bottomText} onChange={(event) => setBottomText(event.target.value)} maxLength={40} />
                 <small>{bottomText.length}/40</small>
+              </div>
+
+              <p className="mini-label font-label">字体风格 · {selectedFont.name}</p>
+              <div className="font-grid" aria-label="选择字体">
+                {FONT_OPTIONS.map((font) => (
+                  <button
+                    key={font.id}
+                    className={fontId === font.id ? "selected" : ""}
+                    onClick={() => setFontId(font.id)}
+                    style={{ fontFamily: font.family, fontWeight: font.weight }}
+                    aria-label={`使用${font.name}`}
+                  >
+                    <span>{font.sample}</span><small>{font.name}</small>
+                  </button>
+                ))}
               </div>
 
               <div className="style-row">
@@ -514,7 +722,7 @@ export default function Home() {
                 <button className="button secondary" onClick={copyMeme}>{copyStatus}</button>
                 <button className="button primary" onClick={downloadMeme}>下载高清 PNG <span>↓</span></button>
               </div>
-              <p className="local-hint">✓ 图片只在当前浏览器中处理，不会上传</p>
+              <p className="local-hint">✓ {mode === "ai" ? "仅你的感受用于生成文案，图片仍在本地处理" : "图片只在当前浏览器中处理，不会上传"}</p>
             </section>
           </div>
         ) : (
@@ -604,9 +812,9 @@ export default function Home() {
       </section>
 
       <section className="benefits" aria-label="产品特点">
-        <article><span>01</span><h3>打开就能做</h3><p>不注册、不学习复杂软件，灵感来了马上开工。</p></article>
+        <article><span>01</span><h3>AI 懂你的情绪</h3><p>一句真实感受，马上得到三套不同语气的表情包方案。</p></article>
         <article><span>02</span><h3>素材不出本机</h3><p>图片和视频在浏览器中处理，隐私不用赌运气。</p></article>
-        <article><span>03</span><h3>生成就能发</h3><p>高清 PNG 和标准 GIF，微信、群聊、评论区都好用。</p></article>
+        <article><span>03</span><h3>八种字体随便换</h3><p>从快乐体到宋体、楷体和手写体，生成就能直接发。</p></article>
       </section>
 
       <footer><span>梗一下 · 让每句话都有表情</span><small>Made for 灵感爆发的那一刻</small></footer>
