@@ -34,7 +34,10 @@ const toneNames: Record<string, string> = {
 const jsonHeaders = { "content-type": "application/json; charset=utf-8" };
 
 const SYSTEM_PROMPT =
-  "你是很懂中文互联网语感的表情包导演。根据用户的真实感受，生成三套可以直接发到聊天里的梗图方案。上方文案负责交代场景，下方文案负责包袱或情绪落点；每段不超过18个汉字，口语自然、不要鸡汤、不要解释。三套要明显不同：一套克制、一套夸张、一套意外反转。不得输出仇恨、威胁、歧视或针对个人的恶毒攻击。emoji 只放一个表情；palette 和 fontId 必须从给定枚举中选择。只返回符合要求的 JSON 对象，不要 Markdown。";
+  "你是很懂中文互联网语感的表情包导演。根据用户的真实感受，生成三套可以直接发到聊天里的梗图方案。上方文案负责交代场景，下方文案负责包袱或情绪落点；每段不超过18个汉字，口语自然、不要鸡汤、不要解释。三套要明显不同：一套克制、一套夸张、一套意外反转。不得输出仇恨、威胁、歧视或针对个人的恶毒攻击。emoji 只放一个表情；palette 和 fontId 必须从给定枚举中选择。只返回一个 JSON 对象，不要 Markdown。对象必须严格使用 emotion 和 candidates 字段，candidates 必须恰好包含三个对象；每个对象必须包含 label、top、bottom、emoji、palette、fontId。";
+
+const REPAIR_PROMPT =
+  "上一次结果的结构不正确。请重新生成，不要解释，只返回 JSON：{\"emotion\":\"情绪标签\",\"candidates\":[{\"label\":\"方案名\",\"top\":\"上方文案\",\"bottom\":\"下方文案\",\"emoji\":\"😶\",\"palette\":\"sunset\",\"fontId\":\"bold\"}, {\"label\":\"方案名\",\"top\":\"上方文案\",\"bottom\":\"下方文案\",\"emoji\":\"😵‍💫\",\"palette\":\"mint\",\"fontId\":\"fun\"}, {\"label\":\"方案名\",\"top\":\"上方文案\",\"bottom\":\"下方文案\",\"emoji\":\"🫠\",\"palette\":\"violet\",\"fontId\":\"round\"}]}";
 
 const MEME_SCHEMA = {
   type: "object",
@@ -103,12 +106,12 @@ export async function handleGenerateMeme(request: Request, env: MemeAiEnv): Prom
     }
 
     try {
-      const result = await generateWithCompatibleProvider(feeling, tone, provider.value);
+      const generated = await generateWithCompatibleProvider(feeling, tone, provider.value);
       return new Response(
         JSON.stringify({
-          source: "compatible",
-          notice: `由 ${provider.value.modelName} 生成 · 使用自定义接口`,
-          ...result,
+          source: generated.source,
+          notice: generated.notice || `由 ${provider.value.modelName} 生成 · 使用自定义接口`,
+          ...generated.result,
         }),
         { headers: jsonHeaders },
       );
@@ -279,13 +282,10 @@ async function generateWithCompatibleProvider(feeling: string, tone: string, pro
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (provider.apiKey) headers.authorization = `Bearer ${provider.apiKey}`;
 
-  const baseBody = {
-    model: provider.modelName,
-    messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: `我的感受：${feeling}\n希望风格：${toneNames[tone]}` },
-    ],
-  };
+  const baseMessages = [
+    { role: "system", content: SYSTEM_PROMPT },
+    { role: "user", content: `我的感受：${feeling}\n希望风格：${toneNames[tone]}` },
+  ];
   const formats: Array<Record<string, unknown> | null> = [
     { type: "json_schema", json_schema: { name: "meme_ideas", strict: true, schema: MEME_SCHEMA } },
     { type: "json_object" },
@@ -293,7 +293,9 @@ async function generateWithCompatibleProvider(feeling: string, tone: string, pro
   ];
 
   let lastError = "接口没有返回有效结果";
-  for (const format of formats) {
+  let lastInvalidContent = "";
+  let receivedModelOutput = false;
+  for (const [attempt, format] of formats.entries()) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 22000);
     try {
@@ -304,7 +306,19 @@ async function generateWithCompatibleProvider(feeling: string, tone: string, pro
         // so a provider cannot redirect the server-side proxy to a private host.
         redirect: "manual",
         signal: controller.signal,
-        body: JSON.stringify({ ...baseBody, ...(format ? { response_format: format } : {}) }),
+        body: JSON.stringify({
+          model: provider.modelName,
+          messages: attempt === 0
+            ? baseMessages
+            : [
+                ...baseMessages,
+                ...(lastInvalidContent
+                  ? [{ role: "assistant", content: lastInvalidContent.slice(0, 4000) }]
+                  : []),
+                { role: "user", content: REPAIR_PROMPT },
+              ],
+          ...(format ? { response_format: format } : {}),
+        }),
       });
       if (response.status >= 300 && response.status < 400) {
         throw new Error("Base URL 返回了跳转响应，请直接填写最终的 HTTPS API 地址");
@@ -324,7 +338,14 @@ async function generateWithCompatibleProvider(feeling: string, tone: string, pro
         lastError = "接口响应中没有 choices[0].message.content";
         continue;
       }
-      return parseMemeResult(content);
+      receivedModelOutput = true;
+      try {
+        return { source: "compatible" as const, result: parseMemeResult(content) };
+      } catch (error) {
+        lastInvalidContent = content;
+        lastError = error instanceof Error ? error.message : "模型返回格式不正确";
+        continue;
+      }
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
         throw new Error("自定义 AI 接口响应超时，请检查 Base URL 或稍后重试");
@@ -333,6 +354,13 @@ async function generateWithCompatibleProvider(feeling: string, tone: string, pro
     } finally {
       clearTimeout(timeout);
     }
+  }
+  if (receivedModelOutput) {
+    return {
+      source: "local" as const,
+      notice: `${provider.modelName} 已响应，但 JSON 格式不完整；已先用本地灵感补齐三套方案。`,
+      result: createLocalIdeas(feeling, tone),
+    };
   }
   throw new Error(lastError);
 }
@@ -357,6 +385,9 @@ async function readProviderError(response: Response, apiKey: string) {
 
 function readChatContent(content: unknown) {
   if (typeof content === "string") return content;
+  if (content && typeof content === "object" && !Array.isArray(content)) {
+    return JSON.stringify(content);
+  }
   if (!Array.isArray(content)) return "";
   return content
     .map((part) => {
@@ -368,51 +399,123 @@ function readChatContent(content: unknown) {
 }
 
 function parseMemeResult(raw: string): MemeAiResult {
-  const withoutFence = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-  const firstBrace = withoutFence.indexOf("{");
-  const lastBrace = withoutFence.lastIndexOf("}");
-  const json = firstBrace >= 0 && lastBrace > firstBrace
-    ? withoutFence.slice(firstBrace, lastBrace + 1)
-    : withoutFence;
-  let value: unknown;
-  try {
-    value = JSON.parse(json);
-  } catch {
-    throw new Error("接口返回的内容不是有效 JSON");
-  }
-  if (!value || typeof value !== "object") throw new Error("接口返回的数据格式不正确");
-  const object = value as Record<string, unknown>;
-  if (typeof object.emotion !== "string" || !Array.isArray(object.candidates) || object.candidates.length !== 3) {
+  const value = parseJsonValue(raw);
+  const root = unwrapResult(value);
+  const object = root && typeof root === "object" && !Array.isArray(root)
+    ? root as Record<string, unknown>
+    : {};
+  const rawCandidates = Array.isArray(root)
+    ? root
+    : pickValue(object, ["candidates", "memes", "ideas", "options", "results", "方案", "表情包"]);
+  const candidateValue = rawCandidates && typeof rawCandidates === "object" && !Array.isArray(rawCandidates)
+    ? Object.values(rawCandidates as Record<string, unknown>)
+    : rawCandidates;
+  if (!Array.isArray(candidateValue) || candidateValue.length < 3) {
     throw new Error("接口没有按要求返回三套表情包文案");
   }
 
-  const candidates = object.candidates.map((candidate) => {
-    if (!candidate || typeof candidate !== "object") throw new Error("表情包方案格式不正确");
-    const item = candidate as Record<string, unknown>;
-    if (
-      typeof item.label !== "string" ||
-      typeof item.top !== "string" ||
-      typeof item.bottom !== "string" ||
-      typeof item.emoji !== "string" ||
-      typeof item.palette !== "string" ||
-      typeof item.fontId !== "string" ||
-      !palettes.has(item.palette as MemeIdea["palette"]) ||
-      !fontIds.has(item.fontId as MemeIdea["fontId"])
-    ) throw new Error("表情包方案缺少必需字段");
+  const fallbackPalettes: MemeIdea["palette"][] = ["sunset", "mint", "violet"];
+  const fallbackFonts: MemeIdea["fontId"][] = ["bold", "fun", "round"];
+  const fallbackEmojis = ["😶", "😵‍💫", "🫠"];
+  const candidates = candidateValue.slice(0, 3).map((candidate, index) => {
+    const item = normalizeCandidate(candidate);
+    const label = readString(item, ["label", "name", "styleName", "方案名", "名称"])
+      || `方案 ${index + 1}`;
+    let top = readString(item, ["top", "topText", "top_text", "upperText", "headline", "title", "text1", "line1", "上方文案", "上方文字"]);
+    let bottom = readString(item, ["bottom", "bottomText", "bottom_text", "lowerText", "punchline", "subtitle", "subtext", "text2", "line2", "下方文案", "下方文字"]);
+    const combined = readString(item, ["text", "copy", "caption", "content", "文案"]);
+    if ((!top || !bottom) && combined) {
+      const lines = combined.split(/\r?\n|\s*[|｜/]\s*/).map((line) => line.trim()).filter(Boolean);
+      top ||= lines[0] || "";
+      bottom ||= lines.slice(1).join(" ") || "";
+    }
+    if (!top || !bottom) throw new Error("表情包文案不能为空");
+
+    const rawPalette = readString(item, ["palette", "color", "theme", "配色"]);
+    const rawFont = readString(item, ["fontId", "font_id", "font", "字体"]);
+    const rawEmoji = readString(item, ["emoji", "icon", "表情"]);
     return {
-      label: item.label.trim().slice(0, 10),
-      top: item.top.trim().slice(0, 40),
-      bottom: item.bottom.trim().slice(0, 40),
-      emoji: Array.from(item.emoji.trim() || "😶").slice(0, 3).join(""),
-      palette: item.palette as MemeIdea["palette"],
-      fontId: item.fontId as MemeIdea["fontId"],
+      label: label.slice(0, 10),
+      top: top.slice(0, 40),
+      bottom: bottom.slice(0, 40),
+      emoji: Array.from(rawEmoji || fallbackEmojis[index]).slice(0, 3).join(""),
+      palette: palettes.has(rawPalette as MemeIdea["palette"])
+        ? rawPalette as MemeIdea["palette"]
+        : fallbackPalettes[index],
+      fontId: fontIds.has(rawFont as MemeIdea["fontId"])
+        ? rawFont as MemeIdea["fontId"]
+        : fallbackFonts[index],
     };
   });
 
-  if (candidates.some((item) => !item.label || !item.top || !item.bottom)) {
-    throw new Error("表情包文案不能为空");
+  const emotion = readString(object, ["emotion", "mood", "emotionLabel", "feeling", "情绪", "心情"])
+    || "心情复杂";
+  return { emotion: emotion.slice(0, 16), candidates };
+}
+
+function parseJsonValue(raw: string): unknown {
+  const trimmed = raw.trim();
+  const attempts = [
+    trimmed,
+    trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, ""),
+  ];
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
+  if (fenced) attempts.push(fenced.trim());
+  const firstBrace = trimmed.indexOf("{");
+  const lastBrace = trimmed.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) attempts.push(trimmed.slice(firstBrace, lastBrace + 1));
+  const firstBracket = trimmed.indexOf("[");
+  const lastBracket = trimmed.lastIndexOf("]");
+  if (firstBracket >= 0 && lastBracket > firstBracket) attempts.push(trimmed.slice(firstBracket, lastBracket + 1));
+
+  for (const attempt of attempts) {
+    try {
+      return JSON.parse(attempt);
+    } catch {
+      // Try the next likely JSON segment.
+    }
   }
-  return { emotion: object.emotion.trim().slice(0, 16), candidates };
+  throw new Error("接口返回的内容不是有效 JSON");
+}
+
+function unwrapResult(value: unknown): unknown {
+  let current = value;
+  for (let depth = 0; depth < 3; depth += 1) {
+    if (!current || typeof current !== "object" || Array.isArray(current)) break;
+    const object = current as Record<string, unknown>;
+    if (pickValue(object, ["candidates", "memes", "ideas", "options", "results", "方案", "表情包"])) break;
+    const nested = pickValue(object, ["data", "result", "output", "meme_ideas", "memeIdeas", "response"]);
+    if (!nested || nested === current) break;
+    if (typeof nested === "string") {
+      try {
+        current = parseJsonValue(nested);
+        continue;
+      } catch {
+        break;
+      }
+    }
+    current = nested;
+  }
+  return current;
+}
+
+function normalizeCandidate(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  if (Array.isArray(value)) return { text1: value[0], text2: value[1] };
+  if (typeof value === "string") return { text: value };
+  throw new Error("表情包方案格式不正确");
+}
+
+function pickValue(object: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    if (object[key] !== undefined && object[key] !== null) return object[key];
+  }
+  return undefined;
+}
+
+function readString(object: Record<string, unknown>, keys: string[]) {
+  const value = pickValue(object, keys);
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function createLocalIdeas(feeling: string, tone: string): MemeAiResult {
