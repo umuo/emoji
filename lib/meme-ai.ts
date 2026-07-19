@@ -300,10 +300,15 @@ async function generateWithCompatibleProvider(feeling: string, tone: string, pro
       const response = await fetch(endpoint, {
         method: "POST",
         headers,
-        redirect: "error",
+        // Cloudflare Workers only supports follow/manual. Keep redirects manual
+        // so a provider cannot redirect the server-side proxy to a private host.
+        redirect: "manual",
         signal: controller.signal,
         body: JSON.stringify({ ...baseBody, ...(format ? { response_format: format } : {}) }),
       });
+      if (response.status >= 300 && response.status < 400) {
+        throw new Error("Base URL 返回了跳转响应，请直接填写最终的 HTTPS API 地址");
+      }
       if (!response.ok) {
         const details = await readProviderError(response, provider.apiKey);
         lastError = `接口返回 ${response.status}${details ? `：${details}` : ""}`;
