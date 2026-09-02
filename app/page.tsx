@@ -16,6 +16,7 @@ import {
   validateGifSourceFile,
   type GifSourceKind,
 } from "../lib/gif-media";
+import { copyGifBlob } from "../lib/gif-clipboard";
 
 type EditorMode = "ai" | "imagegen" | "meme" | "gif";
 type LayoutId = "poster" | "dialogue" | "sticker" | "editorial";
@@ -294,10 +295,14 @@ export default function Home() {
   const [gifUrl, setGifUrl] = useState("");
   const [gifBytes, setGifBytes] = useState(0);
   const [gifError, setGifError] = useState("");
+  const [gifCopyStatus, setGifCopyStatus] = useState("复制 GIF");
+  const [gifCopying, setGifCopying] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
+  const gifPreviewRef = useRef<HTMLImageElement>(null);
   const sourceObjectUrlRef = useRef("");
   const gifObjectUrlRef = useRef("");
+  const gifBlobRef = useRef<Blob | null>(null);
 
   const manualTemplate = useMemo(
     () => TEMPLATES.find((template) => template.id === templateId) ?? TEMPLATES[0],
@@ -885,9 +890,12 @@ export default function Home() {
   const clearGifResult = () => {
     if (gifObjectUrlRef.current) URL.revokeObjectURL(gifObjectUrlRef.current);
     gifObjectUrlRef.current = "";
+    gifBlobRef.current = null;
     setGifUrl("");
     setGifBytes(0);
     setProgress(0);
+    setGifCopyStatus("复制 GIF");
+    setGifCopying(false);
   };
 
   const clearGifSource = () => {
@@ -1090,6 +1098,7 @@ export default function Home() {
       const blob = new Blob([bytes.slice().buffer], { type: "image/gif" });
       const url = URL.createObjectURL(blob);
       gifObjectUrlRef.current = url;
+      gifBlobRef.current = blob;
       setGifUrl(url);
       setGifBytes(blob.size);
     } catch (error) {
@@ -1099,6 +1108,53 @@ export default function Home() {
         : error instanceof Error ? error.message : "转换失败，请换一个素材试试");
     } finally {
       setConverting(false);
+    }
+  };
+
+  const copyGif = async () => {
+    const gifBlob = gifBlobRef.current;
+    if (
+      !gifBlob
+      || !navigator.clipboard?.write
+      || typeof ClipboardItem === "undefined"
+      || gifCopying
+    ) {
+      setGifCopyStatus("请使用下载");
+      return;
+    }
+
+    setGifCopying(true);
+    setGifCopyStatus("复制中…");
+    try {
+      const mode = await copyGifBlob({
+        gifBlob,
+        canWriteGif: typeof ClipboardItem.supports === "function" && ClipboardItem.supports("image/gif"),
+        createItem: (representations) => new ClipboardItem(representations),
+        write: (items) => navigator.clipboard.write(items),
+        createPngFallback: async () => {
+          const image = gifPreviewRef.current;
+          if (!image) throw new Error("GIF 预览尚未就绪");
+          if (!image.complete) await image.decode();
+          const canvas = document.createElement("canvas");
+          canvas.width = image.naturalWidth;
+          canvas.height = image.naturalHeight;
+          const context = canvas.getContext("2d");
+          if (!context) throw new Error("浏览器无法创建画布");
+          context.drawImage(image, 0, 0);
+          return new Promise<Blob>((resolve, reject) => {
+            canvas.toBlob((blob) => {
+              if (blob) resolve(blob);
+              else reject(new Error("无法生成复制预览"));
+            }, "image/png");
+          });
+        },
+      });
+      setGifCopyStatus(mode === "gif" ? "已复制 GIF ✓" : "已复制预览 ✓");
+    } catch {
+      setGifCopyStatus("复制失败，请下载");
+    } finally {
+      setGifCopying(false);
+      window.setTimeout(() => setGifCopyStatus("复制 GIF"), 2200);
     }
   };
 
@@ -1566,7 +1622,7 @@ export default function Home() {
               <div className={`video-stage ${!sourceUrl ? "empty" : ""}`}>
                 {gifUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={gifUrl} alt="生成的 GIF 预览" />
+                  <img ref={gifPreviewRef} src={gifUrl} alt="生成的 GIF 预览" />
                 ) : sourceUrl && gifSourceKind === "video" ? (
                   <video ref={videoRef} src={sourceUrl} crossOrigin="anonymous" controls playsInline onLoadedMetadata={onVideoMetadata} onError={onGifSourceError} />
                 ) : sourceUrl ? (
@@ -1579,7 +1635,11 @@ export default function Home() {
               {gifUrl ? (
                 <>
                   <div className="gif-result-meta"><span>生成成功 ✓</span><b>{fileSizeLabel(gifBytes)}</b></div>
-                  <a className="button primary full-button" href={gifUrl} download="梗一下.gif">下载 GIF <span>↓</span></a>
+                  <div className="action-row gif-action-row">
+                    <button className="button secondary" type="button" onClick={copyGif} disabled={gifCopying}>{gifCopyStatus}</button>
+                    <a className="button primary" href={gifUrl} download="梗一下.gif">下载 GIF <span>↓</span></a>
+                  </div>
+                  <p className="copy-hint">支持 GIF 剪贴板的浏览器会保留动图；其他浏览器自动复制可粘贴的预览。</p>
                   <button className="text-button" onClick={clearGifResult}>调整参数重新生成</button>
                 </>
               ) : (

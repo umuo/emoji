@@ -51,6 +51,8 @@ test("keeps the image-generation model and privacy disclosure in the product UI"
   assert.match(page, /参考图只会在你点击生成时/);
   assert.match(page, /支持上传、粘贴剪贴板图片或图片直链/);
   assert.match(page, /直链素材禁止跨域读取（CORS）/);
+  assert.match(page, /复制 GIF/);
+  assert.match(page, /ClipboardItem\.supports\("image\/gif"\)/);
   assert.match(imageHandler, /只创作社交表情包/);
   assert.match(imageHandler, /images\/\$\{action\}/);
   assert.match(worker, /\/api\/generate-image/);
