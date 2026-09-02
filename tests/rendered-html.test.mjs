@@ -34,7 +34,7 @@ test("server-renders the meme creator", async () => {
   assert.match(html, /AI 心情出图/);
   assert.match(html, /AI 生图/);
   assert.match(html, /图片表情包/);
-  assert.match(html, /视频转 GIF/);
+  assert.match(html, /图片 \/ 视频转 GIF/);
   assert.match(html, /素材流向说清楚/);
   assert.doesNotMatch(html, /Your site is taking shape|Starter Project/);
 });
@@ -49,6 +49,8 @@ test("keeps the image-generation model and privacy disclosure in the product UI"
   assert.match(page, /gpt-image-2/);
   assert.match(page, /Image Model Name/);
   assert.match(page, /参考图只会在你点击生成时/);
+  assert.match(page, /支持上传、粘贴剪贴板图片或图片直链/);
+  assert.match(page, /直链素材禁止跨域读取（CORS）/);
   assert.match(imageHandler, /只创作社交表情包/);
   assert.match(imageHandler, /images\/\$\{action\}/);
   assert.match(worker, /\/api\/generate-image/);

@@ -1,6 +1,21 @@
 "use client";
 
-import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ChangeEvent,
+  ClipboardEvent as ReactClipboardEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  fitGifDimensions,
+  inferGifSourceKind,
+  normalizeMediaUrl,
+  validateGifSourceFile,
+  type GifSourceKind,
+} from "../lib/gif-media";
 
 type EditorMode = "ai" | "imagegen" | "meme" | "gif";
 type LayoutId = "poster" | "dialogue" | "sticker" | "editorial";
@@ -255,14 +270,20 @@ export default function Home() {
   const [imageStyle, setImageStyle] = useState("internet");
   const [referenceFile, setReferenceFile] = useState<File | null>(null);
   const [referenceUrl, setReferenceUrl] = useState("");
+  const referenceObjectUrlRef = useRef("");
   const [generatedImageUrl, setGeneratedImageUrl] = useState("");
   const [generatedImageModel, setGeneratedImageModel] = useState("");
   const [imageGenerating, setImageGenerating] = useState(false);
   const [imageGenError, setImageGenError] = useState("");
   const [imageGenNotice, setImageGenNotice] = useState("");
 
-  const [videoUrl, setVideoUrl] = useState("");
-  const [videoName, setVideoName] = useState("");
+  const [gifSourceKind, setGifSourceKind] = useState<GifSourceKind>("video");
+  const [sourceUrl, setSourceUrl] = useState("");
+  const [sourceName, setSourceName] = useState("");
+  const [sourceLink, setSourceLink] = useState("");
+  const [sourceReady, setSourceReady] = useState(false);
+  const [sourceWidth, setSourceWidth] = useState(0);
+  const [sourceHeight, setSourceHeight] = useState(0);
   const [videoDuration, setVideoDuration] = useState(0);
   const [startAt, setStartAt] = useState(0);
   const [clipLength, setClipLength] = useState(3);
@@ -274,6 +295,9 @@ export default function Home() {
   const [gifBytes, setGifBytes] = useState(0);
   const [gifError, setGifError] = useState("");
   const videoRef = useRef<HTMLVideoElement>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
+  const sourceObjectUrlRef = useRef("");
+  const gifObjectUrlRef = useRef("");
 
   const manualTemplate = useMemo(
     () => TEMPLATES.find((template) => template.id === templateId) ?? TEMPLATES[0],
@@ -617,13 +641,11 @@ export default function Home() {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [settingsOpen]);
 
-  useEffect(() => {
-    return () => {
-      if (videoUrl) URL.revokeObjectURL(videoUrl);
-      if (gifUrl) URL.revokeObjectURL(gifUrl);
-      if (referenceUrl) URL.revokeObjectURL(referenceUrl);
-    };
-  }, [gifUrl, referenceUrl, videoUrl]);
+  useEffect(() => () => {
+    if (sourceObjectUrlRef.current) URL.revokeObjectURL(sourceObjectUrlRef.current);
+    if (gifObjectUrlRef.current) URL.revokeObjectURL(gifObjectUrlRef.current);
+    if (referenceObjectUrlRef.current) URL.revokeObjectURL(referenceObjectUrlRef.current);
+  }, []);
 
   const pickTemplate = (template: MemeTemplate) => {
     setTemplateId(template.id);
@@ -810,9 +832,11 @@ export default function Home() {
       setImageGenError("参考图片请控制在 10 MB 以内");
       return;
     }
-    if (referenceUrl) URL.revokeObjectURL(referenceUrl);
+    if (referenceObjectUrlRef.current) URL.revokeObjectURL(referenceObjectUrlRef.current);
+    const nextReferenceUrl = URL.createObjectURL(file);
+    referenceObjectUrlRef.current = nextReferenceUrl;
     setReferenceFile(file);
-    setReferenceUrl(URL.createObjectURL(file));
+    setReferenceUrl(nextReferenceUrl);
     setGeneratedImageUrl("");
     setGeneratedImageModel("");
     setImageGenNotice("");
@@ -820,7 +844,8 @@ export default function Home() {
   };
 
   const removeReferenceImage = () => {
-    if (referenceUrl) URL.revokeObjectURL(referenceUrl);
+    if (referenceObjectUrlRef.current) URL.revokeObjectURL(referenceObjectUrlRef.current);
+    referenceObjectUrlRef.current = "";
     setReferenceFile(null);
     setReferenceUrl("");
     setGeneratedImageUrl("");
@@ -857,33 +882,137 @@ export default function Home() {
     }
   };
 
-  const loadVideo = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (file.size > 200 * 1024 * 1024) {
-      setGifError("视频请控制在 200 MB 以内");
-      event.target.value = "";
-      return;
-    }
-    if (videoUrl) URL.revokeObjectURL(videoUrl);
-    if (gifUrl) URL.revokeObjectURL(gifUrl);
-    setVideoUrl(URL.createObjectURL(file));
-    setVideoName(file.name);
+  const clearGifResult = () => {
+    if (gifObjectUrlRef.current) URL.revokeObjectURL(gifObjectUrlRef.current);
+    gifObjectUrlRef.current = "";
+    setGifUrl("");
+    setGifBytes(0);
+    setProgress(0);
+  };
+
+  const clearGifSource = () => {
+    if (sourceObjectUrlRef.current) URL.revokeObjectURL(sourceObjectUrlRef.current);
+    sourceObjectUrlRef.current = "";
+    clearGifResult();
+    setSourceUrl("");
+    setSourceName("");
+    setSourceReady(false);
+    setSourceWidth(0);
+    setSourceHeight(0);
     setVideoDuration(0);
     setStartAt(0);
     setClipLength(3);
-    setGifUrl("");
-    setGifBytes(0);
     setGifError("");
-    setProgress(0);
+  };
+
+  const setGifSource = (kind: GifSourceKind, url: string, name: string, ownedObjectUrl = "") => {
+    if (sourceObjectUrlRef.current) URL.revokeObjectURL(sourceObjectUrlRef.current);
+    sourceObjectUrlRef.current = ownedObjectUrl;
+    clearGifResult();
+    setGifSourceKind(kind);
+    setSourceUrl(url);
+    setSourceName(name);
+    setSourceReady(false);
+    setSourceWidth(0);
+    setSourceHeight(0);
+    setVideoDuration(0);
+    setStartAt(0);
+    setClipLength(3);
+    setGifError("");
+  };
+
+  const acceptGifFile = (file: File) => {
+    if (converting) return;
+    const validation = validateGifSourceFile(file);
+    if (validation.error) {
+      setGifError(validation.error);
+      return;
+    }
+    const objectUrl = URL.createObjectURL(file);
+    setSourceLink("");
+    setGifSource(validation.kind, objectUrl, file.name, objectUrl);
+  };
+
+  const loadGifFile = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
     event.target.value = "";
+    if (file) acceptGifFile(file);
+  };
+
+  const loadRemoteGifSource = (rawUrl = sourceLink) => {
+    if (converting) return;
+    try {
+      const normalizedUrl = normalizeMediaUrl(rawUrl);
+      const kind = inferGifSourceKind(normalizedUrl, gifSourceKind);
+      const parsed = new URL(normalizedUrl);
+      const filename = decodeURIComponent(parsed.pathname.split("/").filter(Boolean).pop() || parsed.hostname);
+      setSourceLink(normalizedUrl);
+      setGifSource(kind, normalizedUrl, filename);
+    } catch (error) {
+      setGifError(error instanceof Error ? error.message : "素材直链格式不正确");
+    }
+  };
+
+  const switchGifSourceKind = (kind: GifSourceKind) => {
+    if (kind === gifSourceKind || converting) return;
+    clearGifSource();
+    setSourceLink("");
+    setGifSourceKind(kind);
+  };
+
+  const handleGifPaste = (event: ReactClipboardEvent<HTMLElement>) => {
+    if (converting || settingsOpen) return;
+    const target = event.target as HTMLElement;
+    const isUnrelatedEditable = (
+      target instanceof HTMLInputElement
+      || target instanceof HTMLTextAreaElement
+      || target.isContentEditable
+    ) && !target.hasAttribute("data-gif-source-link");
+    if (isUnrelatedEditable) return;
+
+    const imageItem = Array.from(event.clipboardData.items).find((item) => item.type.startsWith("image/"));
+    const imageFile = imageItem?.getAsFile();
+    if (imageFile) {
+      event.preventDefault();
+      const extension = imageFile.type.split("/")[1]?.replace("jpeg", "jpg") || "png";
+      acceptGifFile(new File([imageFile], `粘贴图片-${Date.now()}.${extension}`, { type: imageFile.type }));
+      return;
+    }
+
+    const pastedText = event.clipboardData.getData("text/plain").trim();
+    if (/^https?:\/\//i.test(pastedText)) {
+      event.preventDefault();
+      setSourceLink(pastedText);
+      loadRemoteGifSource(pastedText);
+    }
   };
 
   const onVideoMetadata = () => {
     const video = videoRef.current;
-    if (!video || !Number.isFinite(video.duration)) return;
+    if (!video || !Number.isFinite(video.duration) || !video.videoWidth || !video.videoHeight) {
+      setGifError("无法读取视频信息，请换一个文件或直链");
+      return;
+    }
+    setSourceReady(true);
+    setSourceWidth(video.videoWidth);
+    setSourceHeight(video.videoHeight);
     setVideoDuration(video.duration);
     setClipLength(Math.min(3, video.duration));
+    setGifError("");
+  };
+
+  const onImageLoaded = () => {
+    const image = imageRef.current;
+    if (!image || !image.naturalWidth || !image.naturalHeight) return;
+    setSourceReady(true);
+    setSourceWidth(image.naturalWidth);
+    setSourceHeight(image.naturalHeight);
+    setGifError("");
+  };
+
+  const onGifSourceError = () => {
+    setSourceReady(false);
+    setGifError("无法加载素材。请确认直链可公开访问，或下载素材后上传");
   };
 
   const seekVideo = (video: HTMLVideoElement, target: number) =>
@@ -910,60 +1039,64 @@ export default function Home() {
 
   const convertToGif = async () => {
     const video = videoRef.current;
-    if (!video || !videoDuration || converting) return;
+    const image = imageRef.current;
+    if (!sourceReady || converting) return;
+    if (gifSourceKind === "video" && (!video || !videoDuration)) return;
+    if (gifSourceKind === "image" && !image) return;
     setConverting(true);
     setGifError("");
     setProgress(0);
-    if (gifUrl) {
-      URL.revokeObjectURL(gifUrl);
-      setGifUrl("");
-    }
+    clearGifResult();
 
     try {
       const { GIFEncoder, applyPalette, quantize } = await import("gifenc");
-      const sourceWidth = video.videoWidth;
-      const sourceHeight = video.videoHeight;
-      const isLandscape = sourceWidth >= sourceHeight;
-      const outputWidth = isLandscape
-        ? gifDimension
-        : Math.max(2, Math.round((sourceWidth / sourceHeight) * gifDimension));
-      const outputHeight = isLandscape
-        ? Math.max(2, Math.round((sourceHeight / sourceWidth) * gifDimension))
-        : gifDimension;
-      const width = outputWidth % 2 === 0 ? outputWidth : outputWidth + 1;
-      const height = outputHeight % 2 === 0 ? outputHeight : outputHeight + 1;
+      const { width, height } = fitGifDimensions(sourceWidth, sourceHeight, gifDimension);
       const frameCanvas = document.createElement("canvas");
       frameCanvas.width = width;
       frameCanvas.height = height;
       const context = frameCanvas.getContext("2d", { willReadFrequently: true });
       if (!context) throw new Error("浏览器无法创建画布");
 
-      const safeLength = Math.min(clipLength, 6, videoDuration - startAt);
-      const frameCount = Math.max(1, Math.ceil(safeLength * gifFps));
       const encoder = GIFEncoder();
-      for (let frame = 0; frame < frameCount; frame += 1) {
-        const time = Math.min(startAt + frame / gifFps, videoDuration - 0.01);
-        await seekVideo(video, Math.max(0, time));
-        context.drawImage(video, 0, 0, width, height);
+      const writeCurrentFrame = (source: CanvasImageSource, delay: number) => {
+        context.clearRect(0, 0, width, height);
+        context.drawImage(source, 0, 0, width, height);
         const imageData = context.getImageData(0, 0, width, height);
         const rgba = new Uint8Array(imageData.data.buffer);
         const palette = quantize(rgba, 128);
         const indexed = applyPalette(rgba, palette);
         encoder.writeFrame(indexed, width, height, {
           palette,
-          delay: Math.round(1000 / gifFps),
+          delay,
         });
-        setProgress(Math.round(((frame + 1) / frameCount) * 100));
-        await new Promise((resolve) => window.setTimeout(resolve, 0));
+      };
+
+      if (gifSourceKind === "image" && image) {
+        writeCurrentFrame(image, 1000);
+        setProgress(100);
+      } else if (video) {
+        const safeLength = Math.min(clipLength, 6, videoDuration - startAt);
+        const frameCount = Math.max(1, Math.ceil(safeLength * gifFps));
+        for (let frame = 0; frame < frameCount; frame += 1) {
+          const time = Math.min(startAt + frame / gifFps, videoDuration - 0.01);
+          await seekVideo(video, Math.max(0, time));
+          writeCurrentFrame(video, Math.round(1000 / gifFps));
+          setProgress(Math.round(((frame + 1) / frameCount) * 100));
+          await new Promise((resolve) => window.setTimeout(resolve, 0));
+        }
       }
       encoder.finish();
       const bytes = encoder.bytes();
       const blob = new Blob([bytes.slice().buffer], { type: "image/gif" });
       const url = URL.createObjectURL(blob);
+      gifObjectUrlRef.current = url;
       setGifUrl(url);
       setGifBytes(blob.size);
     } catch (error) {
-      setGifError(error instanceof Error ? error.message : "转换失败，请换一个视频试试");
+      const isSecurityError = error instanceof DOMException && error.name === "SecurityError";
+      setGifError(isSecurityError
+        ? "直链素材禁止跨域读取（CORS），请先下载到本地再上传"
+        : error instanceof Error ? error.message : "转换失败，请换一个素材试试");
     } finally {
       setConverting(false);
     }
@@ -973,7 +1106,7 @@ export default function Home() {
   const maxClip = Math.max(0.2, Math.min(6, videoDuration - startAt || 6));
 
   return (
-    <main>
+    <main onPaste={mode === "gif" ? handleGifPaste : undefined}>
       <header className="site-header">
         <a className="brand" href="#top" aria-label="梗一下首页">
           <span className="brand-face" aria-hidden="true">:D</span>
@@ -1029,7 +1162,7 @@ export default function Home() {
             role="tab"
             aria-selected={mode === "gif"}
           >
-            <span>04</span> 视频转 GIF
+            <span>04</span> 图片 / 视频转 GIF
           </button>
         </div>
 
@@ -1330,83 +1463,127 @@ export default function Home() {
         ) : (
           <div className="workspace gif-workspace">
             <section className="control-panel" aria-label="GIF 转换设置">
-              <div className="section-heading">
-                <span>1</span>
-                <div><h2>放入一段视频</h2><p>最长截取 6 秒，效果更轻巧</p></div>
+              <div className="media-kind-tabs" role="tablist" aria-label="选择 GIF 素材类型">
+                <button type="button" role="tab" disabled={converting} aria-selected={gifSourceKind === "video"} className={gifSourceKind === "video" ? "active" : ""} onClick={() => switchGifSourceKind("video")}>视频转 GIF</button>
+                <button type="button" role="tab" disabled={converting} aria-selected={gifSourceKind === "image"} className={gifSourceKind === "image" ? "active" : ""} onClick={() => switchGifSourceKind("image")}>图片转 GIF</button>
               </div>
 
-              <label className={`video-drop ${videoUrl ? "has-file" : ""}`}>
-                <input type="file" accept="video/mp4,video/webm,video/quicktime" onChange={loadVideo} />
-                <span className="film-icon" aria-hidden="true">▶</span>
-                <strong>{videoName || "点击选择视频"}</strong>
-                <small>{videoUrl ? "点击可重新选择" : "MP4 / MOV / WEBM · 最大 200 MB"}</small>
+              <div className="section-heading">
+                <span>1</span>
+                <div>
+                  <h2>{gifSourceKind === "video" ? "放入一段视频" : "放入一张图片"}</h2>
+                  <p>{gifSourceKind === "video" ? "上传文件或粘贴可访问的视频直链" : "支持上传、粘贴剪贴板图片或图片直链"}</p>
+                </div>
+              </div>
+
+              <label className={`video-drop ${sourceUrl ? "has-file" : ""}`}>
+                <input
+                  type="file"
+                  disabled={converting}
+                  accept={gifSourceKind === "video" ? "video/mp4,video/webm,video/quicktime,video/ogg" : "image/jpeg,image/png,image/webp,image/avif,image/bmp"}
+                  onChange={loadGifFile}
+                />
+                <span className="film-icon" aria-hidden="true">{gifSourceKind === "video" ? "▶" : "▧"}</span>
+                <strong>{sourceName || (gifSourceKind === "video" ? "点击选择视频" : "点击选择图片")}</strong>
+                <small>{sourceUrl ? "点击可重新选择" : gifSourceKind === "video" ? "MP4 / MOV / WEBM · 最大 200 MB" : "JPG / PNG / WEBP 等 · 最大 20 MB"}</small>
               </label>
 
-              {videoUrl && (
+              <div className="source-or"><span>或者使用直链</span></div>
+              <div className="source-link-row">
+                <input
+                  type="url"
+                  data-gif-source-link
+                  disabled={converting}
+                  value={sourceLink}
+                  onChange={(event) => setSourceLink(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") loadRemoteGifSource();
+                  }}
+                  placeholder={gifSourceKind === "video" ? "粘贴 https://…/video.mp4" : "粘贴 https://…/image.jpg"}
+                  aria-label={gifSourceKind === "video" ? "视频直链" : "图片直链"}
+                />
+                <button type="button" onClick={() => loadRemoteGifSource()} disabled={converting || !sourceLink.trim()}>读取</button>
+              </div>
+              <p className="paste-hint">⌘V / Ctrl+V：{gifSourceKind === "image" ? "可直接粘贴剪贴板图片或图片直链" : "可直接粘贴视频直链"}</p>
+
+              {sourceUrl && (
                 <>
                   <div className="divider" />
                   <div className="section-heading compact">
                     <span>2</span>
-                    <div><h2>选取精彩片段</h2><p>拖动参数，预估输出效果</p></div>
+                    <div>
+                      <h2>{gifSourceKind === "video" ? "选取精彩片段" : "设置输出尺寸"}</h2>
+                      <p>{gifSourceKind === "video" ? "最长截取 6 秒，效果更轻巧" : "图片将转换为单帧 GIF"}</p>
+                    </div>
                   </div>
 
-                  <label className="range-setting">
-                    <span><b>开始时间</b><output>{startAt.toFixed(1)}s</output></span>
-                    <input
-                      type="range"
-                      min="0"
-                      max={maxStart}
-                      step="0.1"
-                      value={startAt}
-                      onChange={(event) => {
-                        const value = Number(event.target.value);
-                        setStartAt(value);
-                        setClipLength((length) => Math.min(length, Math.max(0.2, videoDuration - value)));
-                        if (videoRef.current) videoRef.current.currentTime = value;
-                      }}
-                    />
-                  </label>
+                  {gifSourceKind === "video" && sourceReady && (
+                    <>
+                      <label className="range-setting">
+                        <span><b>开始时间</b><output>{startAt.toFixed(1)}s</output></span>
+                        <input
+                          type="range"
+                          min="0"
+                          max={maxStart}
+                          step="0.1"
+                          value={startAt}
+                          onChange={(event) => {
+                            const value = Number(event.target.value);
+                            setStartAt(value);
+                            setClipLength((length) => Math.min(length, Math.max(0.2, videoDuration - value)));
+                            if (videoRef.current) videoRef.current.currentTime = value;
+                          }}
+                        />
+                      </label>
 
-                  <label className="range-setting">
-                    <span><b>片段长度</b><output>{clipLength.toFixed(1)}s</output></span>
-                    <input type="range" min="0.2" max={maxClip} step="0.1" value={Math.min(clipLength, maxClip)} onChange={(event) => setClipLength(Number(event.target.value))} />
-                  </label>
+                      <label className="range-setting">
+                        <span><b>片段长度</b><output>{clipLength.toFixed(1)}s</output></span>
+                        <input type="range" min="0.2" max={maxClip} step="0.1" value={Math.min(clipLength, maxClip)} onChange={(event) => setClipLength(Number(event.target.value))} />
+                      </label>
+                    </>
+                  )}
 
-                  <div className="select-row">
-                    <label><span>流畅度</span><select value={gifFps} onChange={(event) => setGifFps(Number(event.target.value))}><option value="6">省空间 · 6 FPS</option><option value="8">推荐 · 8 FPS</option><option value="12">流畅 · 12 FPS</option></select></label>
+                  <div className={`select-row ${gifSourceKind === "image" ? "single" : ""}`}>
+                    {gifSourceKind === "video" && <label><span>流畅度</span><select value={gifFps} onChange={(event) => setGifFps(Number(event.target.value))}><option value="6">省空间 · 6 FPS</option><option value="8">推荐 · 8 FPS</option><option value="12">流畅 · 12 FPS</option></select></label>}
                     <label><span>最长边</span><select value={gifDimension} onChange={(event) => setGifDimension(Number(event.target.value))}><option value="320">320 px</option><option value="480">480 px</option><option value="640">640 px</option></select></label>
                   </div>
 
-                  <button className="button primary convert-button" onClick={convertToGif} disabled={converting}>
-                    {converting ? `正在生成 ${progress}%` : "生成 GIF"}
+                  <button className="button primary convert-button" onClick={convertToGif} disabled={converting || !sourceReady}>
+                    {converting ? `正在生成 ${progress}%` : sourceReady ? "生成 GIF" : "正在读取素材…"}
                     <span>{converting ? "···" : "→"}</span>
                   </button>
                   {converting && <div className="progress-track" aria-label={`转换进度 ${progress}%`}><span style={{ width: `${progress}%` }} /></div>}
-                  {gifError && <p className="error-message">{gifError}</p>}
                 </>
               )}
+              {gifError && <p className="error-message">{gifError}</p>}
             </section>
 
-            <section className="preview-panel" aria-label="视频与 GIF 预览">
-              <div className="preview-title"><span>{gifUrl ? "GIF 已生成" : "视频预览"}</span><small>{videoDuration ? `${videoDuration.toFixed(1)} 秒` : "等待视频"}</small></div>
-              <div className={`video-stage ${!videoUrl ? "empty" : ""}`}>
+            <section className="preview-panel" aria-label="素材与 GIF 预览">
+              <div className="preview-title">
+                <span>{gifUrl ? "GIF 已生成" : gifSourceKind === "video" ? "视频预览" : "图片预览"}</span>
+                <small>{gifSourceKind === "video" && videoDuration ? `${videoDuration.toFixed(1)} 秒` : sourceReady ? `${sourceWidth} × ${sourceHeight}` : gifSourceKind === "video" ? "等待视频" : "等待图片"}</small>
+              </div>
+              <div className={`video-stage ${!sourceUrl ? "empty" : ""}`}>
                 {gifUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={gifUrl} alt="生成的 GIF 预览" />
-                ) : videoUrl ? (
-                  <video ref={videoRef} src={videoUrl} controls playsInline onLoadedMetadata={onVideoMetadata} />
+                ) : sourceUrl && gifSourceKind === "video" ? (
+                  <video ref={videoRef} src={sourceUrl} crossOrigin="anonymous" controls playsInline onLoadedMetadata={onVideoMetadata} onError={onGifSourceError} />
+                ) : sourceUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img ref={imageRef} src={sourceUrl} crossOrigin="anonymous" referrerPolicy="no-referrer" alt="待转换图片预览" onLoad={onImageLoaded} onError={onGifSourceError} />
                 ) : (
-                  <div className="empty-state"><span>GIF</span><p>上传后在这里预览</p><small>所有转换都在本机完成</small></div>
+                  <div className="empty-state"><span>GIF</span><p>上传、粘贴或使用直链</p><small>转换过程仍在当前浏览器完成</small></div>
                 )}
               </div>
               {gifUrl ? (
                 <>
                   <div className="gif-result-meta"><span>生成成功 ✓</span><b>{fileSizeLabel(gifBytes)}</b></div>
                   <a className="button primary full-button" href={gifUrl} download="梗一下.gif">下载 GIF <span>↓</span></a>
-                  <button className="text-button" onClick={() => { URL.revokeObjectURL(gifUrl); setGifUrl(""); setProgress(0); }}>调整参数重新生成</button>
+                  <button className="text-button" onClick={clearGifResult}>调整参数重新生成</button>
                 </>
               ) : (
-                <p className="local-hint">✓ 无需上传服务器，敏感视频也放心用</p>
+                <p className="local-hint">✓ 上传与粘贴的素材不会离开当前浏览器；直链只从原地址读取</p>
               )}
             </section>
           </div>
