@@ -1557,13 +1557,21 @@ input[type="range"] {
   white-space: nowrap;
 }
 
-.imagegen-preview .full-button,
+.imagegen-preview .image-result-actions,
 .imagegen-preview .text-button {
   max-width: 540px;
 }
 
-.imagegen-preview .full-button {
-  margin: 0 auto;
+.image-result-actions {
+  margin-top: 0;
+  grid-template-columns: 1.45fr 1fr;
+}
+
+.image-gif-error {
+  width: 100%;
+  max-width: 540px;
+  margin: 10px auto 0;
+  text-align: center;
 }
 
 @keyframes imagegen-spin {

@@ -17,8 +17,9 @@ import {
   type GifSourceKind,
 } from "../lib/gif-media";
 import { copyGifBlob } from "../lib/gif-clipboard";
+import { encodeStillImageGif } from "../lib/generated-image-gif";
 
-type EditorMode = "ai" | "imagegen" | "meme" | "gif";
+type EditorMode = "imagegen" | "meme" | "gif";
 type LayoutId = "poster" | "dialogue" | "sticker" | "editorial";
 
 type MemeTemplate = {
@@ -43,23 +44,6 @@ type LayoutOption = {
   id: LayoutId;
   name: string;
   description: string;
-};
-
-type AiIdea = {
-  label: string;
-  top: string;
-  bottom: string;
-  emoji: string;
-  palette: keyof typeof PALETTES;
-  fontId: FontOption["id"];
-};
-
-type AiResponse = {
-  source: "ai" | "compatible" | "local";
-  notice?: string;
-  emotion: string;
-  candidates: AiIdea[];
-  error?: string;
 };
 
 type ImageGenerationResponse = {
@@ -87,18 +71,8 @@ const DEFAULT_PROVIDER: ProviderSettings = {
 const PROVIDER_STORAGE = {
   enabled: "geng-yixia-provider-enabled",
   baseUrl: "geng-yixia-provider-base-url",
-  modelName: "geng-yixia-provider-model-name",
   imageModelName: "geng-yixia-provider-image-model-name",
   apiKey: "geng-yixia-provider-api-key",
-};
-
-const PALETTES = {
-  sunset: { background: ["#ffdf63", "#ff6b46"] as [string, string], accent: "#171714" },
-  mint: { background: ["#8cd8ca", "#d9f5ef"] as [string, string], accent: "#163a34" },
-  violet: { background: ["#b9a7ff", "#7358ff"] as [string, string], accent: "#ffffff" },
-  pink: { background: ["#ff8fb1", "#ffd4e0"] as [string, string], accent: "#5b1730" },
-  ice: { background: ["#a7dcff", "#edf8ff"] as [string, string], accent: "#17425b" },
-  lime: { background: ["#d5ef62", "#8cd8ca"] as [string, string], accent: "#24320f" },
 };
 
 const FONT_OPTIONS: FontOption[] = [
@@ -118,8 +92,6 @@ const LAYOUT_OPTIONS: LayoutOption[] = [
   { id: "sticker", name: "贴纸弹幕", description: "歪一点更有梗" },
   { id: "editorial", name: "杂志标题", description: "克制但有态度" },
 ];
-
-const AI_LAYOUT_SEQUENCE: LayoutId[] = ["poster", "dialogue", "sticker"];
 
 const TEMPLATES: MemeTemplate[] = [
   {
@@ -236,7 +208,7 @@ function fileSizeLabel(bytes: number) {
 }
 
 export default function Home() {
-  const [mode, setMode] = useState<EditorMode>("ai");
+  const [mode, setMode] = useState<EditorMode>("imagegen");
   const [templateId, setTemplateId] = useState(TEMPLATES[0].id);
   const [topText, setTopText] = useState(TEMPLATES[0].defaultTop);
   const [bottomText, setBottomText] = useState(TEMPLATES[0].defaultBottom);
@@ -245,20 +217,11 @@ export default function Home() {
   const [outlineColor, setOutlineColor] = useState("#111111");
   const [fontId, setFontId] = useState<FontOption["id"]>("bold");
   const [layoutId, setLayoutId] = useState<LayoutId>("poster");
-  const [aiVisual, setAiVisual] = useState<MemeTemplate | null>(null);
   const [uploadedImage, setUploadedImage] = useState<HTMLImageElement | null>(null);
   const [uploadName, setUploadName] = useState("");
   const [copyStatus, setCopyStatus] = useState("复制图片");
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  const [feeling, setFeeling] = useState("我真服了。。。");
-  const [aiTone, setAiTone] = useState("natural");
-  const [aiIdeas, setAiIdeas] = useState<AiIdea[]>([]);
-  const [aiEmotion, setAiEmotion] = useState("");
-  const [aiSource, setAiSource] = useState<"ai" | "compatible" | "local" | "">("");
-  const [aiNotice, setAiNotice] = useState("");
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiError, setAiError] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [useCustomProvider, setUseCustomProvider] = useState(false);
   const [providerSettings, setProviderSettings] = useState<ProviderSettings>(DEFAULT_PROVIDER);
@@ -277,6 +240,8 @@ export default function Home() {
   const [imageGenerating, setImageGenerating] = useState(false);
   const [imageGenError, setImageGenError] = useState("");
   const [imageGenNotice, setImageGenNotice] = useState("");
+  const [imageGifDownloading, setImageGifDownloading] = useState(false);
+  const [imageGifError, setImageGifError] = useState("");
 
   const [gifSourceKind, setGifSourceKind] = useState<GifSourceKind>("video");
   const [sourceUrl, setSourceUrl] = useState("");
@@ -308,7 +273,7 @@ export default function Home() {
     () => TEMPLATES.find((template) => template.id === templateId) ?? TEMPLATES[0],
     [templateId],
   );
-  const selectedTemplate = aiVisual ?? manualTemplate;
+  const selectedTemplate = manualTemplate;
   const selectedFont = FONT_OPTIONS.find((font) => font.id === fontId) ?? FONT_OPTIONS[0];
   const selectedLayout = LAYOUT_OPTIONS.find((layout) => layout.id === layoutId) ?? LAYOUT_OPTIONS[0];
 
@@ -625,7 +590,7 @@ export default function Home() {
       const saved: ProviderSettings = {
         baseUrl: localStorage.getItem(PROVIDER_STORAGE.baseUrl) || DEFAULT_PROVIDER.baseUrl,
         apiKey: sessionStorage.getItem(PROVIDER_STORAGE.apiKey) || "",
-        modelName: localStorage.getItem(PROVIDER_STORAGE.modelName) || DEFAULT_PROVIDER.modelName,
+        modelName: DEFAULT_PROVIDER.modelName,
         imageModelName: localStorage.getItem(PROVIDER_STORAGE.imageModelName) || DEFAULT_PROVIDER.imageModelName,
       };
       const enabled = localStorage.getItem(PROVIDER_STORAGE.enabled) === "true";
@@ -654,7 +619,6 @@ export default function Home() {
 
   const pickTemplate = (template: MemeTemplate) => {
     setTemplateId(template.id);
-    setAiVisual(null);
     setTopText(template.defaultTop);
     setBottomText(template.defaultBottom);
     setUploadedImage(null);
@@ -667,7 +631,6 @@ export default function Home() {
     const objectUrl = URL.createObjectURL(file);
     const image = new Image();
     image.onload = () => {
-      setAiVisual(null);
       setUploadedImage(image);
       setUploadName(file.name);
       URL.revokeObjectURL(objectUrl);
@@ -708,25 +671,6 @@ export default function Home() {
     }, "image/png");
   };
 
-  const applyAiIdea = (idea: AiIdea, index: number) => {
-    const palette = PALETTES[idea.palette] ?? PALETTES.sunset;
-    setAiVisual({
-      id: `ai-${index}`,
-      name: idea.label,
-      emoji: Array.from(idea.emoji || "😶").slice(0, 3).join(""),
-      background: palette.background,
-      accent: palette.accent,
-      defaultTop: idea.top,
-      defaultBottom: idea.bottom,
-    });
-    setTopText(idea.top.slice(0, 40));
-    setBottomText(idea.bottom.slice(0, 40));
-    setFontId(idea.fontId);
-    setLayoutId(AI_LAYOUT_SEQUENCE[index % AI_LAYOUT_SEQUENCE.length]);
-    setUploadedImage(null);
-    setUploadName("");
-  };
-
   const openSettings = () => {
     setDraftSettings(providerSettings);
     setDraftEnabled(useCustomProvider);
@@ -737,7 +681,6 @@ export default function Home() {
 
   const saveSettings = () => {
     const baseUrl = draftSettings.baseUrl.trim().replace(/\/+$/, "");
-    const modelName = draftSettings.modelName.trim();
     const imageModelName = draftSettings.imageModelName.trim();
 
     if (draftEnabled) {
@@ -750,10 +693,6 @@ export default function Home() {
         setSettingsError("Base URL 必须是有效的 HTTPS 地址");
         return;
       }
-      if (!modelName) {
-        setSettingsError("请填写文案模型名称");
-        return;
-      }
       if (!imageModelName) {
         setSettingsError("请填写生图模型名称");
         return;
@@ -763,14 +702,13 @@ export default function Home() {
     const nextSettings = {
       baseUrl: baseUrl || DEFAULT_PROVIDER.baseUrl,
       apiKey: draftSettings.apiKey.trim(),
-      modelName: modelName || DEFAULT_PROVIDER.modelName,
+      modelName: DEFAULT_PROVIDER.modelName,
       imageModelName: imageModelName || DEFAULT_PROVIDER.imageModelName,
     };
     setProviderSettings(nextSettings);
     setUseCustomProvider(draftEnabled);
     localStorage.setItem(PROVIDER_STORAGE.enabled, String(draftEnabled));
     localStorage.setItem(PROVIDER_STORAGE.baseUrl, nextSettings.baseUrl);
-    localStorage.setItem(PROVIDER_STORAGE.modelName, nextSettings.modelName);
     localStorage.setItem(PROVIDER_STORAGE.imageModelName, nextSettings.imageModelName);
     if (nextSettings.apiKey) {
       sessionStorage.setItem(PROVIDER_STORAGE.apiKey, nextSettings.apiKey);
@@ -790,39 +728,6 @@ export default function Home() {
       sessionStorage.removeItem(key);
     });
     setSettingsError("");
-  };
-
-  const generateFromFeeling = async () => {
-    if (feeling.trim().length < 2 || aiLoading) return;
-    setAiLoading(true);
-    setAiError("");
-    setAiNotice("");
-
-    try {
-      const response = await fetch("/api/generate-meme", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          feeling: feeling.trim(),
-          tone: aiTone,
-          ...(useCustomProvider ? { provider: providerSettings } : {}),
-        }),
-      });
-      const data = (await response.json()) as AiResponse;
-      if (!response.ok || data.error) throw new Error(data.error || "生成失败，请稍后再试");
-      if (!Array.isArray(data.candidates) || !data.candidates.length) {
-        throw new Error("这次没接住情绪，再试一次吧");
-      }
-      setAiIdeas(data.candidates);
-      setAiEmotion(data.emotion);
-      setAiSource(data.source);
-      setAiNotice(data.notice || "");
-      applyAiIdea(data.candidates[0], 0);
-    } catch (error) {
-      setAiError(error instanceof Error ? error.message : "生成失败，请稍后再试");
-    } finally {
-      setAiLoading(false);
-    }
   };
 
   const loadReferenceImage = (event: ChangeEvent<HTMLInputElement>) => {
@@ -846,6 +751,7 @@ export default function Home() {
     setGeneratedImageModel("");
     setImageGenNotice("");
     setImageGenError("");
+    setImageGifError("");
   };
 
   const removeReferenceImage = () => {
@@ -856,6 +762,7 @@ export default function Home() {
     setGeneratedImageUrl("");
     setGeneratedImageModel("");
     setImageGenNotice("");
+    setImageGifError("");
   };
 
   const generateMemeImage = async () => {
@@ -864,6 +771,7 @@ export default function Home() {
     setImageGenerating(true);
     setImageGenError("");
     setImageGenNotice("");
+    setImageGifError("");
 
     try {
       const form = new FormData();
@@ -884,6 +792,49 @@ export default function Home() {
       setImageGenError(error instanceof Error ? error.message : "生图失败，请稍后再试");
     } finally {
       setImageGenerating(false);
+    }
+  };
+
+  const downloadGeneratedImageGif = async () => {
+    if (!generatedImageUrl || imageGifDownloading) return;
+    setImageGifDownloading(true);
+    setImageGifError("");
+
+    try {
+      const source = new Image();
+      source.crossOrigin = "anonymous";
+      source.decoding = "async";
+      source.src = generatedImageUrl;
+      if (!source.complete) await source.decode();
+      if (!source.naturalWidth || !source.naturalHeight) {
+        throw new Error("生成图片尚未加载完成，请稍后再试");
+      }
+
+      const maxEdge = Math.min(1024, Math.max(source.naturalWidth, source.naturalHeight));
+      const { width, height } = fitGifDimensions(source.naturalWidth, source.naturalHeight, maxEdge);
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) throw new Error("浏览器无法创建 GIF 画布");
+      context.drawImage(source, 0, 0, width, height);
+
+      const rgba = new Uint8Array(context.getImageData(0, 0, width, height).data.buffer);
+      const bytes = await encodeStillImageGif(rgba, width, height);
+      const blob = new Blob([bytes.buffer], { type: "image/gif" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `梗一下-AI表情包-${Date.now()}.gif`;
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      const isSecurityError = error instanceof DOMException && error.name === "SecurityError";
+      setImageGifError(isSecurityError
+        ? "图片来源禁止跨域读取，暂时无法转成 GIF；你仍可下载高清图"
+        : error instanceof Error ? error.message : "GIF 生成失败，请稍后再试");
+    } finally {
+      setImageGifDownloading(false);
     }
   };
 
@@ -1173,7 +1124,7 @@ export default function Home() {
           <button className="settings-button" type="button" onClick={openSettings}>
             <span aria-hidden="true">⚙</span>
             <span>AI 设置</span>
-            <small>{useCustomProvider ? providerSettings.modelName : "站点默认"}</small>
+            <small>{useCustomProvider ? providerSettings.imageModelName : "站点默认"}</small>
           </button>
         </div>
       </header>
@@ -1183,26 +1134,18 @@ export default function Home() {
           <p className="eyebrow">30 秒，造个好梗</p>
           <h1>不学 PS，<br /><span>也能做表情包。</span></h1>
         </div>
-        <p className="hero-copy">说出感受，或者直接描述画面。<br />AI 接梗、AI 生图、GIF 一站做好。</p>
+        <p className="hero-copy">描述画面，或者直接上传素材。<br />AI 生图、图片编辑、GIF 一站做好。</p>
       </section>
 
       <section className="creator-shell" aria-label="表情包创作工具">
         <div className="mode-tabs" role="tablist" aria-label="选择工具">
-          <button
-            className={mode === "ai" ? "active" : ""}
-            onClick={() => setMode("ai")}
-            role="tab"
-            aria-selected={mode === "ai"}
-          >
-            <span>01</span> AI 心情出图 <b>NEW</b>
-          </button>
           <button
             className={mode === "imagegen" ? "active" : ""}
             onClick={() => setMode("imagegen")}
             role="tab"
             aria-selected={mode === "imagegen"}
           >
-            <span>02</span> AI 生图 <b>NEW</b>
+            <span>01</span> AI 生图 <b>NEW</b>
           </button>
           <button
             className={mode === "meme" ? "active" : ""}
@@ -1210,7 +1153,7 @@ export default function Home() {
             role="tab"
             aria-selected={mode === "meme"}
           >
-            <span>03</span> 图片表情包
+            <span>02</span> 图片表情包
           </button>
           <button
             className={mode === "gif" ? "active" : ""}
@@ -1218,7 +1161,7 @@ export default function Home() {
             role="tab"
             aria-selected={mode === "gif"}
           >
-            <span>04</span> 图片 / 视频转 GIF
+            <span>03</span> 图片 / 视频转 GIF
           </button>
         </div>
 
@@ -1321,7 +1264,13 @@ export default function Home() {
               {generatedImageUrl ? (
                 <>
                   <div className="image-result-meta"><span>{imageGenNotice || "生成成功 ✓"}</span><b>{generatedImageModel || "AI Image"}</b></div>
-                  <a className="button primary full-button" href={generatedImageUrl} download="梗一下-AI表情包.png">下载高清图片 <span>↓</span></a>
+                  <div className="action-row image-result-actions">
+                    <a className="button primary" href={generatedImageUrl} download="梗一下-AI表情包.png">下载高清图 <span>↓</span></a>
+                    <button className="button secondary" type="button" onClick={downloadGeneratedImageGif} disabled={imageGifDownloading}>
+                      {imageGifDownloading ? "正在生成 GIF…" : "下载 GIF"} <span>↓</span>
+                    </button>
+                  </div>
+                  {imageGifError && <p className="error-message image-gif-error">{imageGifError}</p>}
                   <button className="text-button" onClick={generateMemeImage} disabled={imageGenerating}>用同一提示词再生成一张</button>
                 </>
               ) : (
@@ -1329,119 +1278,42 @@ export default function Home() {
               )}
             </section>
           </div>
-        ) : mode !== "gif" ? (
+        ) : mode === "meme" ? (
           <div className="workspace">
             <section className="control-panel" aria-label="编辑设置">
-              {mode === "ai" ? (
-                <>
-                  <div className="section-heading">
-                    <span>1</span>
-                    <div><h2>现在是什么感受？</h2><p>越像你平时说话，生成的梗越自然</p></div>
-                  </div>
+              <div className="section-heading">
+                <span>1</span>
+                <div><h2>选一张底图</h2><p>热门模板，或者用你自己的</p></div>
+              </div>
 
-                  <div className="feeling-field">
-                    <textarea
-                      value={feeling}
-                      onChange={(event) => setFeeling(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) generateFromFeeling();
-                      }}
-                      maxLength={120}
-                      placeholder="比如：我真服了。。。"
-                      aria-label="描述当前感受"
-                    />
-                    <span>{feeling.length}/120</span>
-                  </div>
-
-                  <div className="feeling-examples" aria-label="感受示例">
-                    {["我真服了。。。", "累到不想说话", "今天也太爽了吧", "尴尬得想换个星球"].map((example) => (
-                      <button key={example} onClick={() => setFeeling(example)}>{example}</button>
-                    ))}
-                  </div>
-
-                  <p className="mini-label">想要什么语气</p>
-                  <div className="tone-grid">
-                    {[
-                      ["natural", "自然吐槽"],
-                      ["work", "打工人"],
-                      ["cute", "可爱一点"],
-                      ["savage", "嘴替模式"],
-                      ["absurd", "抽象发疯"],
-                    ].map(([id, label]) => (
-                      <button key={id} className={aiTone === id ? "selected" : ""} onClick={() => setAiTone(id)}>{label}</button>
-                    ))}
-                  </div>
-
-                  <button className="button ai-generate-button" onClick={generateFromFeeling} disabled={aiLoading || feeling.trim().length < 2}>
-                    <span className="sparkle" aria-hidden="true">✦</span>
-                    {aiLoading ? "AI 正在琢磨你的心情…" : "AI 帮我出三套梗"}
-                    <span aria-hidden="true">→</span>
+              <div className="template-grid">
+                {TEMPLATES.map((template) => (
+                  <button
+                    key={template.id}
+                    className={`template-card ${!uploadedImage && template.id === templateId ? "selected" : ""}`}
+                    onClick={() => pickTemplate(template)}
+                    style={{
+                      background: `linear-gradient(135deg, ${template.background[0]}, ${template.background[1]})`,
+                    }}
+                    aria-label={`使用${template.name}模板`}
+                  >
+                    <span>{template.emoji}</span>
+                    <small>{template.name}</small>
                   </button>
-                  <button className="provider-shortcut" type="button" onClick={openSettings}>
-                    当前：{useCustomProvider ? `${providerSettings.modelName} · 自定义接口` : "站点默认接口"}
-                    <span>切换 →</span>
-                  </button>
-                  {aiError && <p className="error-message">{aiError}</p>}
+                ))}
+              </div>
 
-                  {aiIdeas.length > 0 && (
-                    <div className="ai-results">
-                      <div className="ai-results-title">
-                        <span>{aiSource === "local" ? "灵感已接住" : "AI 已接住"} · {aiEmotion}</span>
-                        <small>点一套换上</small>
-                      </div>
-                      <div className="idea-list">
-                        {aiIdeas.map((idea, index) => (
-                          <button
-                            key={`${idea.label}-${index}`}
-                            className={aiVisual?.id === `ai-${index}` ? "selected" : ""}
-                            onClick={() => applyAiIdea(idea, index)}
-                          >
-                            <span className="idea-emoji">{idea.emoji}</span>
-                            <span><b>{idea.label}</b><small>{idea.top} → {idea.bottom}</small></span>
-                          </button>
-                        ))}
-                      </div>
-                      {aiNotice && <p className="ai-notice">{aiNotice}</p>}
-                    </div>
-                  )}
-                </>
-              ) : (
-                <>
-                  <div className="section-heading">
-                    <span>1</span>
-                    <div><h2>选一张底图</h2><p>热门模板，或者用你自己的</p></div>
-                  </div>
-
-                  <div className="template-grid">
-                    {TEMPLATES.map((template) => (
-                      <button
-                        key={template.id}
-                        className={`template-card ${!uploadedImage && template.id === templateId ? "selected" : ""}`}
-                        onClick={() => pickTemplate(template)}
-                        style={{
-                          background: `linear-gradient(135deg, ${template.background[0]}, ${template.background[1]})`,
-                        }}
-                        aria-label={`使用${template.name}模板`}
-                      >
-                        <span>{template.emoji}</span>
-                        <small>{template.name}</small>
-                      </button>
-                    ))}
-                  </div>
-
-                  <label className={`upload-button ${uploadedImage ? "has-file" : ""}`}>
-                    <input type="file" accept="image/jpeg,image/png,image/webp" onChange={loadImage} />
-                    <span className="upload-plus">＋</span>
-                    <span>{uploadName || "上传自己的图片"}<small>JPG / PNG / WEBP</small></span>
-                  </label>
-                </>
-              )}
+              <label className={`upload-button ${uploadedImage ? "has-file" : ""}`}>
+                <input type="file" accept="image/jpeg,image/png,image/webp" onChange={loadImage} />
+                <span className="upload-plus">＋</span>
+                <span>{uploadName || "上传自己的图片"}<small>JPG / PNG / WEBP</small></span>
+              </label>
 
               <div className="divider" />
 
               <div className="section-heading compact">
                 <span>2</span>
-                <div><h2>{mode === "ai" ? "不满意就自己改" : "写点什么"}</h2><p>版式、文案和字体都会实时更新</p></div>
+                <div><h2>写点什么</h2><p>版式、文案和字体都会实时更新</p></div>
               </div>
 
               <label className="field-label" htmlFor="top-copy">铺垫文案</label>
@@ -1513,7 +1385,7 @@ export default function Home() {
                 <button className="button secondary" onClick={copyMeme}>{copyStatus}</button>
                 <button className="button primary" onClick={downloadMeme}>下载高清 PNG <span>↓</span></button>
               </div>
-              <p className="local-hint">✓ {mode === "ai" ? "仅你的感受用于生成文案，图片仍在本地处理" : "图片只在当前浏览器中处理，不会上传"}</p>
+              <p className="local-hint">✓ 图片只在当前浏览器中处理，不会上传</p>
             </section>
           </div>
         ) : (
@@ -1651,7 +1523,7 @@ export default function Home() {
       </section>
 
       <section className="benefits" aria-label="产品特点">
-        <article><span>01</span><h3>两种 AI 创作路线</h3><p>一句感受生成文案，或者用提示词与参考图直接创造全新表情包。</p></article>
+        <article><span>01</span><h3>AI 生图直达成品</h3><p>用提示词与参考图创造全新表情包，成品支持高清图与 GIF 下载。</p></article>
         <article><span>02</span><h3>素材流向说清楚</h3><p>手动图片与视频在本机处理；参考图仅在 AI 生图时发送给所选服务。</p></article>
         <article><span>03</span><h3>手动编辑也够好玩</h3><p>四种构图、八种字体与自定义配色，随时把 AI 灵感改成你的梗。</p></article>
       </section>
@@ -1710,20 +1582,6 @@ export default function Home() {
                   </button>
                 </div>
                 <small>仅保存在当前浏览器会话；无鉴权的兼容接口可留空</small>
-              </label>
-
-              <label className="settings-field">
-                <span>Text Model Name</span>
-                <input
-                  type="text"
-                  value={draftSettings.modelName}
-                  onChange={(event) => setDraftSettings((current) => ({ ...current, modelName: event.target.value }))}
-                  placeholder="gpt-5.6-sol"
-                  disabled={!draftEnabled}
-                  autoCapitalize="none"
-                  spellCheck={false}
-                />
-                <small>用于“AI 心情出图”的文案模型 ID</small>
               </label>
 
               <label className="settings-field">

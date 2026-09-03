@@ -4,7 +4,7 @@ import "@fontsource/zcool-kuaile/chinese-simplified.css";
 import "./globals.css";
 
 const title = "梗一下｜AI 表情包生成器与 GIF 制作器";
-const description = "用感受生成表情包文案，或通过提示词和参考图直接 AI 生图；还支持多种字体、图片编辑与图片/视频转 GIF。";
+const description = "通过提示词和参考图直接 AI 生图，并下载高清图或 GIF；还支持多种字体、图片编辑与图片/视频转 GIF。";
 
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();

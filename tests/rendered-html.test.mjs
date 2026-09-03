@@ -31,7 +31,7 @@ test("server-renders the meme creator", async () => {
   const html = await response.text();
   assert.match(html, /<html lang="zh-CN">/);
   assert.match(html, /<title>梗一下｜AI 表情包生成器与 GIF 制作器<\/title>/);
-  assert.match(html, /AI 心情出图/);
+  assert.doesNotMatch(html, /AI 心情出图/);
   assert.match(html, /AI 生图/);
   assert.match(html, /图片表情包/);
   assert.match(html, /图片 \/ 视频转 GIF/);
@@ -52,6 +52,8 @@ test("keeps the image-generation model and privacy disclosure in the product UI"
   assert.match(page, /支持上传、粘贴剪贴板图片或图片直链/);
   assert.match(page, /直链素材禁止跨域读取（CORS）/);
   assert.match(page, /复制 GIF/);
+  assert.match(page, /downloadGeneratedImageGif/);
+  assert.match(page, /下载高清图/);
   assert.match(page, /ClipboardItem\.supports\("image\/gif"\)/);
   assert.match(imageHandler, /只创作社交表情包/);
   assert.match(imageHandler, /images\/\$\{action\}/);
