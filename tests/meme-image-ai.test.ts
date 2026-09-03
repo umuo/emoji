@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { handleGenerateMemeImage } from "../lib/meme-image-ai";
+import { handleGenerateMemeImage, handleGenerateMemePack } from "../lib/meme-image-ai";
 
 const provider = {
   baseUrl: "https://images.example.com/v1",
@@ -95,4 +95,41 @@ test("rejects oversized or unsupported reference images before calling the provi
 
   assert.equal(response.status, 400);
   assert.match(payload.error, /仅支持 PNG、JPG 或 WEBP/);
+});
+
+test("generates a 3 by 4 person expression sheet with model-authored captions", async () => {
+  const originalFetch = globalThis.fetch;
+  let upstreamUrl = "";
+  globalThis.fetch = async (input, init) => {
+    upstreamUrl = String(input);
+    assert.ok(init?.body instanceof FormData);
+    const upstream = init.body as FormData;
+    assert.equal(upstream.get("size"), "1024x1536");
+    assert.match(String(upstream.get("prompt")), /3 列 × 4 行/);
+    assert.match(String(upstream.get("prompt")), /自行创作一句 2–6 个汉字/);
+    assert.doesNotMatch(String(upstream.get("prompt")), /浏览器.*配字/);
+    return new Response(JSON.stringify({ data: [{ b64_json: "AAAA" }] }), {
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    const form = new FormData();
+    form.append("image", new File(["person"], "person.png", { type: "image/png" }));
+    form.append("style", "sticker");
+    form.append("prompt", "整体可爱一点");
+    form.append("provider", JSON.stringify(provider));
+    const response = await handleGenerateMemePack(new Request("https://site.example/api/generate-pack", {
+      method: "POST",
+      body: form,
+    }), {});
+    const payload = await response.json() as { imageUrl: string; referenceUsed: boolean };
+
+    assert.equal(response.status, 200);
+    assert.equal(upstreamUrl, "https://images.example.com/v1/images/edits");
+    assert.equal(payload.imageUrl, "data:image/png;base64,AAAA");
+    assert.equal(payload.referenceUsed, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

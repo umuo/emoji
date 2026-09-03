@@ -2,7 +2,7 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import { handleGenerateMeme } from "../lib/meme-ai";
-import { handleGenerateMemeImage } from "../lib/meme-image-ai";
+import { handleGenerateMemeImage, handleGenerateMemePack } from "../lib/meme-image-ai";
 
 interface Env {
   ASSETS: Fetcher;
@@ -40,6 +40,10 @@ const worker = {
 
     if (url.pathname === "/api/generate-image") {
       return handleGenerateMemeImage(request, env);
+    }
+
+    if (url.pathname === "/api/generate-pack") {
+      return handleGenerateMemePack(request, env);
     }
 
     if (url.pathname === "/_vinext/image") {

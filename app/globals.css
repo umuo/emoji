@@ -876,6 +876,10 @@ main {
   grid-column: 1 / -1;
 }
 
+.pack-style-grid button:last-child {
+  grid-column: auto;
+}
+
 .image-style-grid button.selected {
   background: #eeeaff;
   border-color: var(--ink);
@@ -990,6 +994,19 @@ main {
   border: 1.5px solid var(--ink);
   border-radius: 50%;
   font-size: 18px;
+}
+
+.pack-preference-field {
+  margin-top: 0;
+}
+
+.pack-preference-field textarea {
+  min-height: 92px;
+  font-size: 12px;
+}
+
+.pack-generate-button {
+  background: var(--orange);
 }
 
 .image-generate-button {
@@ -1469,6 +1486,80 @@ input[type="range"] {
   object-fit: contain;
 }
 
+.pack-stage {
+  width: min(100%, 510px);
+  aspect-ratio: 2 / 3;
+  position: relative;
+  margin: 0 auto;
+  overflow: hidden;
+  background: #16151b;
+  border: 3px solid var(--ink);
+  box-shadow: 8px 8px 0 rgba(23, 23, 20, .24);
+}
+
+.pack-stage.has-slices,
+.pack-empty-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(4, minmax(0, 1fr));
+  gap: 3px;
+  background: var(--ink);
+}
+
+.pack-tile {
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  margin: 0;
+  overflow: hidden;
+  background: #f1ede3;
+}
+
+.pack-tile img,
+.pack-sheet-image {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.pack-sheet-image {
+  object-fit: contain;
+}
+
+.pack-tile > span {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  min-width: 24px;
+  padding: 3px 4px;
+  color: var(--white);
+  background: rgba(23, 23, 20, .78);
+  border-radius: 3px;
+  font-family: monospace;
+  font-size: 8px;
+  font-weight: 900;
+  line-height: 1;
+  text-align: center;
+}
+
+.pack-empty-grid {
+  width: 100%;
+  height: 100%;
+}
+
+.pack-empty-grid span {
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, .28);
+  background:
+    radial-gradient(circle at 50% 42%, rgba(185, 167, 255, .24), transparent 34%),
+    #25232c;
+  font-family: monospace;
+  font-size: 10px;
+  font-weight: 900;
+}
+
 .imagegen-empty {
   max-width: 290px;
   padding: 26px;
@@ -1562,6 +1653,35 @@ input[type="range"] {
 .imagegen-preview .image-result-links,
 .imagegen-preview .text-button {
   max-width: 540px;
+}
+
+.pack-result-meta,
+.pack-actions,
+.pack-result-links,
+.pack-download-note {
+  max-width: 510px;
+}
+
+.pack-actions {
+  width: 100%;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.pack-actions .button {
+  min-width: 0;
+  padding-inline: 13px;
+}
+
+.pack-download-note {
+  width: 100%;
+  margin: 10px auto 0;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.5;
+  text-align: center;
 }
 
 .image-result-actions {
@@ -2276,8 +2396,8 @@ footer small {
   .mode-tabs button {
     min-width: 0;
     flex: 1;
-    padding: 13px 10px;
-    font-size: 11px;
+    padding: 13px 7px;
+    font-size: 10px;
   }
 
   .mode-tabs button span {
@@ -2324,6 +2444,7 @@ footer small {
   }
 
   .image-workflow-actions,
+  .pack-actions,
   .export-preset-grid {
     grid-template-columns: 1fr;
   }
