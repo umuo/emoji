@@ -1586,7 +1586,9 @@ export default function Home() {
                           max={maxStart}
                           step="0.1"
                           value={startAt}
+                          disabled={converting}
                           onChange={(event) => {
+                            clearGifResult();
                             const value = Number(event.target.value);
                             setStartAt(value);
                             setClipLength((length) => Math.min(length, Math.max(0.2, videoDuration - value)));
@@ -1597,7 +1599,10 @@ export default function Home() {
 
                       <label className="range-setting">
                         <span><b>片段长度</b><output>{clipLength.toFixed(1)}s</output></span>
-                        <input type="range" min="0.2" max={maxClip} step="0.1" value={Math.min(clipLength, maxClip)} onChange={(event) => setClipLength(Number(event.target.value))} />
+                        <input type="range" min="0.2" max={maxClip} step="0.1" value={Math.min(clipLength, maxClip)} disabled={converting} onChange={(event) => {
+                          clearGifResult();
+                          setClipLength(Number(event.target.value));
+                        }} />
                       </label>
                     </>
                   )}
@@ -1615,7 +1620,10 @@ export default function Home() {
                           key={id}
                           type="button"
                           className={stillGifEffect === id ? "selected" : ""}
-                          onClick={() => setStillGifEffect(id as StillGifEffect)}
+                          onClick={() => {
+                            clearGifResult();
+                            setStillGifEffect(id as StillGifEffect);
+                          }}
                           disabled={converting}
                         >
                           <span aria-hidden="true">{icon}</span>
@@ -1627,19 +1635,34 @@ export default function Home() {
 
                   <div className="select-row">
                     {gifSourceKind === "video" ? (
-                      <label><span>流畅度</span><select value={gifFps} onChange={(event) => setGifFps(Number(event.target.value))}><option value="6">省空间 · 6 FPS</option><option value="8">推荐 · 8 FPS</option><option value="12">流畅 · 12 FPS</option></select></label>
+                      <label><span>流畅度</span><select value={gifFps} onChange={(event) => {
+                        clearGifResult();
+                        setGifFps(Number(event.target.value));
+                      }} disabled={converting}><option value="6">省空间 · 6 FPS</option><option value="8">推荐 · 8 FPS</option><option value="12">流畅 · 12 FPS</option></select></label>
                     ) : (
-                      <label><span>动效速度</span><select value={stillGifSpeed} onChange={(event) => setStillGifSpeed(event.target.value as GifAnimationSpeed)} disabled={stillGifEffect === "still"}><option value="slow">慢一点</option><option value="normal">刚刚好</option><option value="fast">快一点</option></select></label>
+                      <label><span>动效速度</span><select value={stillGifSpeed} onChange={(event) => {
+                        clearGifResult();
+                        setStillGifSpeed(event.target.value as GifAnimationSpeed);
+                      }} disabled={converting || stillGifEffect === "still"}><option value="slow">慢一点</option><option value="normal">刚刚好</option><option value="fast">快一点</option></select></label>
                     )}
-                    <label><span>循环次数</span><select value={gifRepeat} onChange={(event) => setGifRepeat(Number(event.target.value))} disabled={gifSourceKind === "image" && stillGifEffect === "still"}><option value="-1">播放一次</option><option value="2">循环 3 次</option><option value="0">一直循环</option></select></label>
+                    <label><span>循环次数</span><select value={gifRepeat} onChange={(event) => {
+                      clearGifResult();
+                      setGifRepeat(Number(event.target.value));
+                    }} disabled={converting || (gifSourceKind === "image" && stillGifEffect === "still")}><option value="-1">播放一次</option><option value="2">循环 3 次</option><option value="0">一直循环</option></select></label>
                   </div>
 
                   <p className="mini-label export-label">导出规格</p>
                   <div className="export-preset-grid" aria-label="选择 GIF 导出规格">
-                    <button type="button" className={gifExportPreset === "compact" ? "selected" : ""} onClick={() => setGifExportPreset("compact")} disabled={converting}>
+                    <button type="button" className={gifExportPreset === "compact" ? "selected" : ""} onClick={() => {
+                      clearGifResult();
+                      setGifExportPreset("compact");
+                    }} disabled={converting}>
                       <b>小体积</b><small>360px · 64 色 · 更易发送</small>
                     </button>
-                    <button type="button" className={gifExportPreset === "hd" ? "selected" : ""} onClick={() => setGifExportPreset("hd")} disabled={converting}>
+                    <button type="button" className={gifExportPreset === "hd" ? "selected" : ""} onClick={() => {
+                      clearGifResult();
+                      setGifExportPreset("hd");
+                    }} disabled={converting}>
                       <b>高清 GIF</b><small>640px · 128 色 · 细节更多</small>
                     </button>
                   </div>
@@ -1660,15 +1683,18 @@ export default function Home() {
                 <small>{gifSourceKind === "video" && videoDuration ? `${videoDuration.toFixed(1)} 秒` : sourceReady ? `${sourceWidth} × ${sourceHeight}` : gifSourceKind === "video" ? "等待视频" : "等待图片"}</small>
               </div>
               <div className={`video-stage ${!sourceUrl ? "empty" : ""}`}>
-                {gifUrl ? (
+                {sourceUrl && gifSourceKind === "video" && (
+                  <video ref={videoRef} src={sourceUrl} hidden={Boolean(gifUrl)} crossOrigin="anonymous" controls playsInline onLoadedMetadata={onVideoMetadata} onError={onGifSourceError} />
+                )}
+                {sourceUrl && gifSourceKind === "image" && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img ref={imageRef} src={sourceUrl} hidden={Boolean(gifUrl)} crossOrigin="anonymous" referrerPolicy="no-referrer" alt="待转换图片预览" onLoad={onImageLoaded} onError={onGifSourceError} />
+                )}
+                {gifUrl && (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img ref={gifPreviewRef} src={gifUrl} alt="生成的 GIF 预览" />
-                ) : sourceUrl && gifSourceKind === "video" ? (
-                  <video ref={videoRef} src={sourceUrl} crossOrigin="anonymous" controls playsInline onLoadedMetadata={onVideoMetadata} onError={onGifSourceError} />
-                ) : sourceUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img ref={imageRef} src={sourceUrl} crossOrigin="anonymous" referrerPolicy="no-referrer" alt="待转换图片预览" onLoad={onImageLoaded} onError={onGifSourceError} />
-                ) : (
+                )}
+                {!sourceUrl && (
                   <div className="empty-state"><span>GIF</span><p>上传、粘贴或使用直链</p><small>转换过程仍在当前浏览器完成</small></div>
                 )}
               </div>

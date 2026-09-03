@@ -59,6 +59,8 @@ test("keeps the image-generation model and privacy disclosure in the product UI"
   assert.match(page, /发疯抖动/);
   assert.match(page, /高清 GIF/);
   assert.match(page, /copyGeneratedImage/);
+  assert.match(page, /hidden=\{Boolean\(gifUrl\)\}/);
+  assert.match(page, /clearGifResult\(\);\s*setStillGifEffect/);
   assert.match(page, /ClipboardItem\.supports\("image\/gif"\)/);
   assert.match(imageHandler, /只创作社交表情包/);
   assert.match(imageHandler, /images\/\$\{action\}/);

@@ -2051,6 +2051,10 @@ input[type="range"] {
   object-fit: contain;
 }
 
+.video-stage [hidden] {
+  display: none;
+}
+
 .empty-state {
   color: var(--white);
   text-align: center;
