@@ -17,7 +17,15 @@ import {
   type GifSourceKind,
 } from "../lib/gif-media";
 import { copyGifBlob } from "../lib/gif-clipboard";
-import { encodeStillImageGif } from "../lib/generated-image-gif";
+import { createGifFrameEncoder, encodeStillImageGif } from "../lib/generated-image-gif";
+import {
+  createStillGifFrames,
+  GIF_EXPORT_SETTINGS,
+  type GifAnimationSpeed,
+  type GifExportPreset,
+  type StillGifEffect,
+  type StillGifFrame,
+} from "../lib/gif-effects";
 
 type EditorMode = "imagegen" | "meme" | "gif";
 type LayoutId = "poster" | "dialogue" | "sticker" | "editorial";
@@ -207,6 +215,20 @@ function fileSizeLabel(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function loadCanvasImage(url: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    if (/^https?:\/\//i.test(url)) {
+      image.crossOrigin = "anonymous";
+      image.referrerPolicy = "no-referrer";
+    }
+    image.decoding = "async";
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("图片无法读取，请下载后再上传"));
+    image.src = url;
+  });
+}
+
 export default function Home() {
   const [mode, setMode] = useState<EditorMode>("imagegen");
   const [templateId, setTemplateId] = useState(TEMPLATES[0].id);
@@ -242,6 +264,8 @@ export default function Home() {
   const [imageGenNotice, setImageGenNotice] = useState("");
   const [imageGifDownloading, setImageGifDownloading] = useState(false);
   const [imageGifError, setImageGifError] = useState("");
+  const [imageCopyStatus, setImageCopyStatus] = useState("复制图片");
+  const [imageWorkflowBusy, setImageWorkflowBusy] = useState<"edit" | "gif" | "">("");
 
   const [gifSourceKind, setGifSourceKind] = useState<GifSourceKind>("video");
   const [sourceUrl, setSourceUrl] = useState("");
@@ -254,7 +278,10 @@ export default function Home() {
   const [startAt, setStartAt] = useState(0);
   const [clipLength, setClipLength] = useState(3);
   const [gifFps, setGifFps] = useState(8);
-  const [gifDimension, setGifDimension] = useState(480);
+  const [gifExportPreset, setGifExportPreset] = useState<GifExportPreset>("compact");
+  const [stillGifEffect, setStillGifEffect] = useState<StillGifEffect>("shake");
+  const [stillGifSpeed, setStillGifSpeed] = useState<GifAnimationSpeed>("normal");
+  const [gifRepeat, setGifRepeat] = useState(0);
   const [converting, setConverting] = useState(false);
   const [progress, setProgress] = useState(0);
   const [gifUrl, setGifUrl] = useState("");
@@ -752,6 +779,7 @@ export default function Home() {
     setImageGenNotice("");
     setImageGenError("");
     setImageGifError("");
+    setImageCopyStatus("复制图片");
   };
 
   const removeReferenceImage = () => {
@@ -763,6 +791,7 @@ export default function Home() {
     setGeneratedImageModel("");
     setImageGenNotice("");
     setImageGifError("");
+    setImageCopyStatus("复制图片");
   };
 
   const generateMemeImage = async () => {
@@ -772,6 +801,7 @@ export default function Home() {
     setImageGenError("");
     setImageGenNotice("");
     setImageGifError("");
+    setImageCopyStatus("复制图片");
 
     try {
       const form = new FormData();
@@ -801,11 +831,7 @@ export default function Home() {
     setImageGifError("");
 
     try {
-      const source = new Image();
-      source.crossOrigin = "anonymous";
-      source.decoding = "async";
-      source.src = generatedImageUrl;
-      if (!source.complete) await source.decode();
+      const source = await loadCanvasImage(generatedImageUrl);
       if (!source.naturalWidth || !source.naturalHeight) {
         throw new Error("生成图片尚未加载完成，请稍后再试");
       }
@@ -835,6 +861,40 @@ export default function Home() {
         : error instanceof Error ? error.message : "GIF 生成失败，请稍后再试");
     } finally {
       setImageGifDownloading(false);
+    }
+  };
+
+  const copyGeneratedImage = async () => {
+    if (!generatedImageUrl || imageCopyStatus !== "复制图片") return;
+    if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
+      setImageCopyStatus("请使用下载");
+      window.setTimeout(() => setImageCopyStatus("复制图片"), 2000);
+      return;
+    }
+
+    setImageCopyStatus("复制中…");
+    setImageGifError("");
+    try {
+      const source = await loadCanvasImage(generatedImageUrl);
+      const canvas = document.createElement("canvas");
+      canvas.width = source.naturalWidth;
+      canvas.height = source.naturalHeight;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("浏览器无法创建复制画布");
+      context.drawImage(source, 0, 0);
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((value) => {
+          if (value) resolve(value);
+          else reject(new Error("无法生成可复制图片"));
+        }, "image/png");
+      });
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+      setImageCopyStatus("已复制 ✓");
+    } catch (error) {
+      setImageCopyStatus("复制失败");
+      setImageGifError(error instanceof Error ? error.message : "图片复制失败，请使用下载");
+    } finally {
+      window.setTimeout(() => setImageCopyStatus("复制图片"), 2200);
     }
   };
 
@@ -878,6 +938,36 @@ export default function Home() {
     setStartAt(0);
     setClipLength(3);
     setGifError("");
+  };
+
+  const continueEditingGeneratedImage = async () => {
+    if (!generatedImageUrl || imageWorkflowBusy) return;
+    setImageWorkflowBusy("edit");
+    setImageGifError("");
+    try {
+      const image = await loadCanvasImage(generatedImageUrl);
+      setUploadedImage(image);
+      setUploadName("AI 生成图片");
+      setTopText("");
+      setBottomText("");
+      setMode("meme");
+      window.requestAnimationFrame(() => document.querySelector(".creator-shell")?.scrollIntoView({ behavior: "smooth" }));
+    } catch (error) {
+      setImageGifError(error instanceof Error ? error.message : "暂时无法继续编辑这张图片");
+    } finally {
+      setImageWorkflowBusy("");
+    }
+  };
+
+  const animateGeneratedImage = () => {
+    if (!generatedImageUrl || imageWorkflowBusy) return;
+    setImageWorkflowBusy("gif");
+    setSourceLink("");
+    setStillGifEffect("shake");
+    setGifSource("image", generatedImageUrl, "AI 生成图片.png");
+    setMode("gif");
+    window.requestAnimationFrame(() => document.querySelector(".creator-shell")?.scrollIntoView({ behavior: "smooth" }));
+    setImageWorkflowBusy("");
   };
 
   const acceptGifFile = (file: File) => {
@@ -1008,31 +1098,56 @@ export default function Home() {
     clearGifResult();
 
     try {
-      const { GIFEncoder, applyPalette, quantize } = await import("gifenc");
-      const { width, height } = fitGifDimensions(sourceWidth, sourceHeight, gifDimension);
+      const exportSettings = GIF_EXPORT_SETTINGS[gifExportPreset];
+      const { width, height } = fitGifDimensions(sourceWidth, sourceHeight, exportSettings.maxEdge);
       const frameCanvas = document.createElement("canvas");
       frameCanvas.width = width;
       frameCanvas.height = height;
       const context = frameCanvas.getContext("2d", { willReadFrequently: true });
       if (!context) throw new Error("浏览器无法创建画布");
 
-      const encoder = GIFEncoder();
-      const writeCurrentFrame = (source: CanvasImageSource, delay: number) => {
+      const repeat = gifSourceKind === "image" && stillGifEffect === "still" ? -1 : gifRepeat;
+      const encoder = await createGifFrameEncoder(width, height, exportSettings.colors, repeat);
+      const writeCurrentFrame = (
+        source: CanvasImageSource,
+        delay: number,
+        transform?: StillGifFrame,
+      ) => {
         context.clearRect(0, 0, width, height);
-        context.drawImage(source, 0, 0, width, height);
+        if (transform) {
+          context.save();
+          context.translate(
+            width / 2 + transform.offsetX * width,
+            height / 2 + transform.offsetY * height,
+          );
+          context.rotate((transform.rotation * Math.PI) / 180);
+          const drawWidth = width * transform.scale;
+          const drawHeight = height * transform.scale;
+          context.drawImage(source, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+          context.restore();
+          if (transform.flash > 0) {
+            context.fillStyle = `rgba(255,255,255,${transform.flash})`;
+            context.fillRect(0, 0, width, height);
+          }
+        } else {
+          context.drawImage(source, 0, 0, width, height);
+        }
         const imageData = context.getImageData(0, 0, width, height);
         const rgba = new Uint8Array(imageData.data.buffer);
-        const palette = quantize(rgba, 128);
-        const indexed = applyPalette(rgba, palette);
-        encoder.writeFrame(indexed, width, height, {
-          palette,
-          delay,
-        });
+        encoder.writeFrame(rgba, delay);
       };
 
       if (gifSourceKind === "image" && image) {
-        writeCurrentFrame(image, 1000);
-        setProgress(100);
+        const animation = createStillGifFrames(stillGifEffect, stillGifSpeed);
+        for (let frame = 0; frame < animation.frames.length; frame += 1) {
+          writeCurrentFrame(
+            image,
+            animation.delay,
+            animation.frames[frame],
+          );
+          setProgress(Math.round(((frame + 1) / animation.frames.length) * 100));
+          await new Promise((resolve) => window.setTimeout(resolve, 0));
+        }
       } else if (video) {
         const safeLength = Math.min(clipLength, 6, videoDuration - startAt);
         const frameCount = Math.max(1, Math.ceil(safeLength * gifFps));
@@ -1044,8 +1159,7 @@ export default function Home() {
           await new Promise((resolve) => window.setTimeout(resolve, 0));
         }
       }
-      encoder.finish();
-      const bytes = encoder.bytes();
+      const bytes = encoder.finish();
       const blob = new Blob([bytes.slice().buffer], { type: "image/gif" });
       const url = URL.createObjectURL(blob);
       gifObjectUrlRef.current = url;
@@ -1266,12 +1380,29 @@ export default function Home() {
                   <div className="image-result-meta"><span>{imageGenNotice || "生成成功 ✓"}</span><b>{generatedImageModel || "AI Image"}</b></div>
                   <div className="action-row image-result-actions">
                     <a className="button primary" href={generatedImageUrl} download="梗一下-AI表情包.png">下载高清图 <span>↓</span></a>
-                    <button className="button secondary" type="button" onClick={downloadGeneratedImageGif} disabled={imageGifDownloading}>
-                      {imageGifDownloading ? "正在生成 GIF…" : "下载 GIF"} <span>↓</span>
+                    <button className="button secondary" type="button" onClick={copyGeneratedImage} disabled={imageCopyStatus === "复制中…"}>
+                      {imageCopyStatus}
+                    </button>
+                  </div>
+                  <div className="image-workflow-actions">
+                    <button type="button" onClick={continueEditingGeneratedImage} disabled={Boolean(imageWorkflowBusy)}>
+                      <span aria-hidden="true">✎</span>
+                      <b>{imageWorkflowBusy === "edit" ? "正在载入…" : "继续编辑"}</b>
+                      <small>改文字、字体与版式</small>
+                    </button>
+                    <button type="button" onClick={animateGeneratedImage} disabled={Boolean(imageWorkflowBusy)}>
+                      <span aria-hidden="true">↝</span>
+                      <b>制作动态 GIF</b>
+                      <small>抖动、弹跳、缩放、闪烁</small>
                     </button>
                   </div>
                   {imageGifError && <p className="error-message image-gif-error">{imageGifError}</p>}
-                  <button className="text-button" onClick={generateMemeImage} disabled={imageGenerating}>用同一提示词再生成一张</button>
+                  <div className="image-result-links">
+                    <button className="text-button" type="button" onClick={downloadGeneratedImageGif} disabled={imageGifDownloading}>
+                      {imageGifDownloading ? "正在生成…" : "直接下载静态 GIF"}
+                    </button>
+                    <button className="text-button" type="button" onClick={generateMemeImage} disabled={imageGenerating}>同一提示词再生成</button>
+                  </div>
                 </>
               ) : (
                 <p className="local-hint">✦ 系统会自动把需求收敛为适合聊天转发的单张表情包</p>
@@ -1440,8 +1571,8 @@ export default function Home() {
                   <div className="section-heading compact">
                     <span>2</span>
                     <div>
-                      <h2>{gifSourceKind === "video" ? "选取精彩片段" : "设置输出尺寸"}</h2>
-                      <p>{gifSourceKind === "video" ? "最长截取 6 秒，效果更轻巧" : "图片将转换为单帧 GIF"}</p>
+                      <h2>{gifSourceKind === "video" ? "选取精彩片段" : "让图片动起来"}</h2>
+                      <p>{gifSourceKind === "video" ? "最长截取 6 秒，效果更轻巧" : "选择一个适合这张梗图的循环动效"}</p>
                     </div>
                   </div>
 
@@ -1471,13 +1602,50 @@ export default function Home() {
                     </>
                   )}
 
-                  <div className={`select-row ${gifSourceKind === "image" ? "single" : ""}`}>
-                    {gifSourceKind === "video" && <label><span>流畅度</span><select value={gifFps} onChange={(event) => setGifFps(Number(event.target.value))}><option value="6">省空间 · 6 FPS</option><option value="8">推荐 · 8 FPS</option><option value="12">流畅 · 12 FPS</option></select></label>}
-                    <label><span>最长边</span><select value={gifDimension} onChange={(event) => setGifDimension(Number(event.target.value))}><option value="320">320 px</option><option value="480">480 px</option><option value="640">640 px</option></select></label>
+                  {gifSourceKind === "image" && (
+                    <div className="effect-grid" aria-label="选择图片动效">
+                      {[
+                        ["still", "静态兼容", "■"],
+                        ["shake", "发疯抖动", "≋"],
+                        ["bounce", "开心弹跳", "↕"],
+                        ["zoom", "强调缩放", "⊕"],
+                        ["flash", "高亮闪烁", "✦"],
+                      ].map(([id, label, icon]) => (
+                        <button
+                          key={id}
+                          type="button"
+                          className={stillGifEffect === id ? "selected" : ""}
+                          onClick={() => setStillGifEffect(id as StillGifEffect)}
+                          disabled={converting}
+                        >
+                          <span aria-hidden="true">{icon}</span>
+                          <b>{label}</b>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="select-row">
+                    {gifSourceKind === "video" ? (
+                      <label><span>流畅度</span><select value={gifFps} onChange={(event) => setGifFps(Number(event.target.value))}><option value="6">省空间 · 6 FPS</option><option value="8">推荐 · 8 FPS</option><option value="12">流畅 · 12 FPS</option></select></label>
+                    ) : (
+                      <label><span>动效速度</span><select value={stillGifSpeed} onChange={(event) => setStillGifSpeed(event.target.value as GifAnimationSpeed)} disabled={stillGifEffect === "still"}><option value="slow">慢一点</option><option value="normal">刚刚好</option><option value="fast">快一点</option></select></label>
+                    )}
+                    <label><span>循环次数</span><select value={gifRepeat} onChange={(event) => setGifRepeat(Number(event.target.value))} disabled={gifSourceKind === "image" && stillGifEffect === "still"}><option value="-1">播放一次</option><option value="2">循环 3 次</option><option value="0">一直循环</option></select></label>
+                  </div>
+
+                  <p className="mini-label export-label">导出规格</p>
+                  <div className="export-preset-grid" aria-label="选择 GIF 导出规格">
+                    <button type="button" className={gifExportPreset === "compact" ? "selected" : ""} onClick={() => setGifExportPreset("compact")} disabled={converting}>
+                      <b>小体积</b><small>360px · 64 色 · 更易发送</small>
+                    </button>
+                    <button type="button" className={gifExportPreset === "hd" ? "selected" : ""} onClick={() => setGifExportPreset("hd")} disabled={converting}>
+                      <b>高清 GIF</b><small>640px · 128 色 · 细节更多</small>
+                    </button>
                   </div>
 
                   <button className="button primary convert-button" onClick={convertToGif} disabled={converting || !sourceReady}>
-                    {converting ? `正在生成 ${progress}%` : sourceReady ? "生成 GIF" : "正在读取素材…"}
+                    {converting ? `正在生成 ${progress}%` : sourceReady ? gifSourceKind === "image" && stillGifEffect !== "still" ? "生成动态 GIF" : "生成 GIF" : "正在读取素材…"}
                     <span>{converting ? "···" : "→"}</span>
                   </button>
                   {converting && <div className="progress-track" aria-label={`转换进度 ${progress}%`}><span style={{ width: `${progress}%` }} /></div>}
@@ -1523,7 +1691,7 @@ export default function Home() {
       </section>
 
       <section className="benefits" aria-label="产品特点">
-        <article><span>01</span><h3>AI 生图直达成品</h3><p>用提示词与参考图创造全新表情包，成品支持高清图与 GIF 下载。</p></article>
+        <article><span>01</span><h3>AI 生图接着玩</h3><p>成图可以复制、继续编辑，或加上抖动与弹跳效果做成动态 GIF。</p></article>
         <article><span>02</span><h3>素材流向说清楚</h3><p>手动图片与视频在本机处理；参考图仅在 AI 生图时发送给所选服务。</p></article>
         <article><span>03</span><h3>手动编辑也够好玩</h3><p>四种构图、八种字体与自定义配色，随时把 AI 灵感改成你的梗。</p></article>
       </section>
