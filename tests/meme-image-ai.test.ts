@@ -117,6 +117,7 @@ test("generates a 3 by 4 person expression sheet with model-authored captions", 
     const form = new FormData();
     form.append("image", new File(["person"], "person.png", { type: "image/png" }));
     form.append("style", "sticker");
+    form.append("layout", "3x4");
     form.append("prompt", "整体可爱一点");
     form.append("provider", JSON.stringify(provider));
     const response = await handleGenerateMemePack(new Request("https://site.example/api/generate-pack", {
@@ -129,6 +130,34 @@ test("generates a 3 by 4 person expression sheet with model-authored captions", 
     assert.equal(upstreamUrl, "https://images.example.com/v1/images/edits");
     assert.equal(payload.imageUrl, "data:image/png;base64,AAAA");
     assert.equal(payload.referenceUsed, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("uses a square canvas and 16 reactions for the 4x4 pack", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_input, init) => {
+    const upstream = init?.body as FormData;
+    assert.equal(upstream.get("size"), "1024x1024");
+    assert.match(String(upstream.get("prompt")), /4 列 × 4 行，共 16 个格子/);
+    assert.match(String(upstream.get("prompt")), /求求了/);
+    return new Response(JSON.stringify({ data: [{ b64_json: "AAAA" }] }));
+  };
+
+  try {
+    const form = new FormData();
+    form.append("image", new File(["person"], "person.png", { type: "image/png" }));
+    form.append("layout", "4x4");
+    form.append("provider", JSON.stringify(provider));
+    const response = await handleGenerateMemePack(new Request("https://site.example/api/generate-pack", {
+      method: "POST",
+      body: form,
+    }), {});
+    const payload = await response.json() as { notice: string };
+
+    assert.equal(response.status, 200);
+    assert.match(payload.notice, /4×4/);
   } finally {
     globalThis.fetch = originalFetch;
   }

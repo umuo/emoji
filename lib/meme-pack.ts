@@ -1,6 +1,6 @@
-export const MEME_PACK_COLUMNS = 3;
-export const MEME_PACK_ROWS = 4;
-export const MEME_PACK_COUNT = MEME_PACK_COLUMNS * MEME_PACK_ROWS;
+import { MEME_PACK_COLUMNS, MEME_PACK_COUNT, MEME_PACK_ROWS } from "./meme-pack-layouts";
+
+export * from "./meme-pack-layouts";
 
 export type MemePackCell = {
   index: number;
@@ -12,16 +12,24 @@ export type MemePackCell = {
   height: number;
 };
 
-export function getMemePackCells(width: number, height: number): MemePackCell[] {
+export function getMemePackCells(
+  width: number,
+  height: number,
+  columns = MEME_PACK_COLUMNS,
+  rows = MEME_PACK_ROWS,
+): MemePackCell[] {
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
     throw new Error("表情包大图尺寸无效");
   }
+  if (!Number.isInteger(columns) || !Number.isInteger(rows) || columns < 1 || rows < 1) {
+    throw new Error("表情包网格规格无效");
+  }
 
-  const cellWidth = width / MEME_PACK_COLUMNS;
-  const cellHeight = height / MEME_PACK_ROWS;
-  return Array.from({ length: MEME_PACK_COUNT }, (_, index) => {
-    const column = index % MEME_PACK_COLUMNS;
-    const row = Math.floor(index / MEME_PACK_COLUMNS);
+  const cellWidth = width / columns;
+  const cellHeight = height / rows;
+  return Array.from({ length: columns * rows }, (_, index) => {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
     return {
       index,
       column,
@@ -40,9 +48,10 @@ export function getMemePackFilename(index: number, extension: "png" | "gif") {
 
 export async function createMemePackArchive(
   files: Array<{ name: string; data: Blob | Uint8Array }>,
+  expectedCount = MEME_PACK_COUNT,
 ) {
-  if (files.length !== MEME_PACK_COUNT) {
-    throw new Error(`压缩包必须包含 ${MEME_PACK_COUNT} 张表情包`);
+  if (!Number.isInteger(expectedCount) || expectedCount < 1 || files.length !== expectedCount) {
+    throw new Error(`压缩包必须包含 ${expectedCount} 张表情包`);
   }
   const { default: JSZip } = await import("jszip");
   const zip = new JSZip();

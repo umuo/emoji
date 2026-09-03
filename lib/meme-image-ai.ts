@@ -1,4 +1,5 @@
 import { isPrivateHostname, parseProvider, type ProviderConfig } from "./meme-ai";
+import { getMemePackLayout } from "./meme-pack-layouts";
 
 export type MemeImageEnv = {
   OPENAI_API_KEY?: string;
@@ -32,16 +33,21 @@ const MEME_IMAGE_SYSTEM_PROMPT = `
 `.trim();
 
 const MEME_PACK_SYSTEM_PROMPT = `
-你是一名中文社交表情包套装设计师。请以用户上传照片中的人物为唯一主角，生成一整张竖版人物表情包分镜表，尽量保留脸型、发型、五官与可识别特征，同时把动作和情绪适度夸张。
+你是一名中文社交表情包套装设计师。请以用户上传照片中的人物为唯一主角，生成一整张人物表情包分镜表，尽量保留脸型、发型、五官与可识别特征，同时把动作和情绪适度夸张。
 
 硬性要求：
-1. 画面必须严格排列为 3 列 × 4 行，共 12 个大小完全一致的独立格子；每格人物都居中，任何人物、文字和装饰都不得跨越格子边界。
-2. 12 格分别覆盖聊天中常用但不重复的表达，例如收到、赞同、感谢、大笑、无语、生气、拒绝、鼓励、询问、晚安、马上到、告别；你可以根据人物表情自行调整成更自然的具体语气。
+1. 必须严格遵守“本次套装规格”指定的列数、行数和总数，所有格子大小完全一致；每格人物都居中，任何人物、文字和装饰都不得跨越格子边界。
+2. 各格分别覆盖“本次情绪范围”中的常用聊天表达，表情、动作和文案不得重复；你可以根据人物特征调整成更自然的具体语气。
 3. 每格由你自行创作一句 2–6 个汉字的简短中文配字。配字必须与该格表情和动作匹配，清楚、准确、醒目，不得出现乱码、拼音、英文或重复文案。
 4. 所有文字必须完整放在各自格子的安全区域内，使用粗体高对比中文字体，在缩小后仍可辨认。
 5. 每格使用简洁独立背景，并保留清晰的切割边界；不要添加格子编号、总标题、说明文字、水印、二维码或品牌 Logo。
-6. 最终只输出这一张 3×4 表情包大图，不要输出额外说明或单独图片。
+6. 最终只输出一张符合本次套装规格的表情包大图，不要输出额外说明或单独图片。
 `.trim();
+
+const memePackReactions = [
+  "收到", "大笑", "无语", "感谢", "赞同", "生气", "拒绝", "鼓励",
+  "询问", "晚安", "马上到", "告别", "震惊", "委屈", "得意", "求求了",
+];
 
 export async function handleGenerateMemeImage(request: Request, env: MemeImageEnv): Promise<Response> {
   if (request.method !== "POST") return jsonError("只支持 POST 请求", 405);
@@ -141,11 +147,12 @@ export async function handleGenerateMemePack(request: Request, env: MemeImageEnv
     : "";
   const styleId = typeof form.get("style") === "string" ? String(form.get("style")) : "sticker";
   const style = stylePrompts[styleId] || stylePrompts.sticker;
+  const layout = getMemePackLayout(typeof form.get("layout") === "string" ? String(form.get("layout")) : null);
   const providerResult = resolveProvider(form.get("provider"), env);
   if ("error" in providerResult) return jsonError(providerResult.error || "自定义接口设置不完整", 400);
   const provider = providerResult.value;
   const imageModelName = provider.imageModelName || env.OPENAI_IMAGE_MODEL || "gpt-image-2";
-  const fullPrompt = `${MEME_PACK_SYSTEM_PROMPT}\n\n视觉风格：${style}${preference ? `\n\n用户补充偏好：${preference}` : ""}`;
+  const fullPrompt = `${MEME_PACK_SYSTEM_PROMPT}\n\n本次套装规格：严格 ${layout.columns} 列 × ${layout.rows} 行，共 ${layout.count} 个格子。\n本次情绪范围：${memePackReactions.slice(0, layout.count).join("、")}。\n视觉风格：${style}${preference ? `\n\n用户补充偏好：${preference}` : ""}`;
   const endpoint = buildImageEndpoint(provider.baseUrl, "edits");
 
   try {
@@ -156,7 +163,7 @@ export async function handleGenerateMemePack(request: Request, env: MemeImageEnv
       fullPrompt,
       referenceImage,
       false,
-      { size: "1024x1536" },
+      { size: layout.size },
     );
     if (!response.ok && [400, 415, 422].includes(response.status)) {
       response = await callImageProvider(endpoint, provider, imageModelName, fullPrompt, referenceImage, true);
@@ -182,7 +189,7 @@ export async function handleGenerateMemePack(request: Request, env: MemeImageEnv
       imageUrl: image.url,
       model: imageModelName,
       referenceUsed: true,
-      notice: "3×4 人物表情套装生成完成",
+      notice: `${layout.label} 人物表情套装生成完成`,
     }), { headers: jsonHeaders });
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {

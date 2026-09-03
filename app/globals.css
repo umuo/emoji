@@ -880,6 +880,46 @@ main {
   grid-column: auto;
 }
 
+.pack-layout-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.pack-layout-grid button {
+  min-width: 0;
+  padding: 11px 7px 9px;
+  display: grid;
+  gap: 3px;
+  color: var(--ink);
+  background: #f2eee4;
+  border: 1.5px solid #aaa69d;
+  border-radius: 6px;
+  text-align: center;
+}
+
+.pack-layout-grid button.selected {
+  background: #fff1c0;
+  border-color: var(--ink);
+  box-shadow: 3px 3px 0 var(--yellow);
+}
+
+.pack-layout-grid b {
+  font-family: monospace;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.pack-layout-grid small {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.pack-style-label {
+  margin-top: 18px;
+}
+
 .image-style-grid button.selected {
   background: #eeeaff;
   border-color: var(--ink);

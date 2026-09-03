@@ -41,9 +41,10 @@ test("server-renders the meme creator", async () => {
 });
 
 test("keeps the image-generation model and privacy disclosure in the product UI", async () => {
-  const [page, imageHandler, worker] = await Promise.all([
+  const [page, imageHandler, packConfig, worker] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../lib/meme-image-ai.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/meme-pack-layouts.ts", import.meta.url), "utf8"),
     readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
   ]);
 
@@ -59,6 +60,11 @@ test("keeps the image-generation model and privacy disclosure in the product UI"
   assert.match(page, /制作动态 GIF/);
   assert.match(page, /下载 PNG 压缩包/);
   assert.match(page, /下载 GIF 压缩包/);
+  assert.match(packConfig, /2×2/);
+  assert.match(packConfig, /3×3/);
+  assert.match(packConfig, /3×4/);
+  assert.match(packConfig, /4×4/);
+  assert.match(page, /selectedPackLayout\.count/);
   assert.match(page, /每格文字由 gpt-image-2 随表情创作/);
   assert.match(page, /fetch\("\/api\/generate-pack"/);
   assert.match(page, /发疯抖动/);

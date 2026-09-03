@@ -30,7 +30,11 @@ import {
   createMemePackArchive,
   getMemePackCells,
   getMemePackFilename,
+  getMemePackLayout,
+  MEME_PACK_LAYOUTS,
   type MemePackCell,
+  type MemePackLayout,
+  type MemePackLayoutId,
 } from "../lib/meme-pack";
 
 type EditorMode = "imagegen" | "pack" | "meme" | "gif";
@@ -281,6 +285,7 @@ export default function Home() {
 
   const [packPhotoFile, setPackPhotoFile] = useState<File | null>(null);
   const [packPhotoUrl, setPackPhotoUrl] = useState("");
+  const [packLayoutId, setPackLayoutId] = useState<MemePackLayoutId>("3x4");
   const [packStyle, setPackStyle] = useState("sticker");
   const [packPreference, setPackPreference] = useState("");
   const [packImageUrl, setPackImageUrl] = useState("");
@@ -330,6 +335,7 @@ export default function Home() {
   const selectedTemplate = manualTemplate;
   const selectedFont = FONT_OPTIONS.find((font) => font.id === fontId) ?? FONT_OPTIONS[0];
   const selectedLayout = LAYOUT_OPTIONS.find((layout) => layout.id === layoutId) ?? LAYOUT_OPTIONS[0];
+  const selectedPackLayout = getMemePackLayout(packLayoutId);
 
   const paintMeme = useCallback(() => {
     const canvas = canvasRef.current;
@@ -972,7 +978,17 @@ export default function Home() {
     setPackError("");
   };
 
-  const sliceMemePack = async (imageUrl: string) => {
+  const selectPackLayout = (layoutId: MemePackLayoutId) => {
+    if (layoutId === packLayoutId) return;
+    clearPackSlices();
+    setPackLayoutId(layoutId);
+    setPackImageUrl("");
+    setPackModel("");
+    setPackNotice("");
+    setPackError("");
+  };
+
+  const sliceMemePack = async (imageUrl: string, layout: MemePackLayout) => {
     const source = await loadCanvasImage(imageUrl);
     if (!source.naturalWidth || !source.naturalHeight) {
       throw new Error("表情套装图片尚未加载完成，请稍后再试");
@@ -980,7 +996,12 @@ export default function Home() {
 
     const createdUrls: string[] = [];
     try {
-      const nextSlices = await Promise.all(getMemePackCells(source.naturalWidth, source.naturalHeight).map(async (cell) => {
+      const nextSlices = await Promise.all(getMemePackCells(
+        source.naturalWidth,
+        source.naturalHeight,
+        layout.columns,
+        layout.rows,
+      ).map(async (cell) => {
         const canvas = document.createElement("canvas");
         canvas.width = Math.max(1, Math.round(cell.width));
         canvas.height = Math.max(1, Math.round(cell.height));
@@ -1019,6 +1040,7 @@ export default function Home() {
 
   const generateMemePack = async () => {
     if (!packPhotoFile || packGenerating) return;
+    const requestedLayout = selectedPackLayout;
     setPackGenerating(true);
     setPackError("");
     setPackNotice("");
@@ -1030,6 +1052,7 @@ export default function Home() {
       const form = new FormData();
       form.append("image", packPhotoFile, packPhotoFile.name);
       form.append("style", packStyle);
+      form.append("layout", requestedLayout.id);
       if (packPreference.trim()) form.append("prompt", packPreference.trim());
       if (useCustomProvider) form.append("provider", JSON.stringify(providerSettings));
 
@@ -1041,8 +1064,8 @@ export default function Home() {
 
       setPackImageUrl(data.imageUrl);
       setPackModel(data.model || "");
-      setPackNotice(data.notice || "12 张人物表情生成完成");
-      await sliceMemePack(data.imageUrl);
+      setPackNotice(data.notice || `${requestedLayout.count} 张人物表情生成完成`);
+      await sliceMemePack(data.imageUrl, requestedLayout);
     } catch (error) {
       const isSecurityError = error instanceof DOMException && error.name === "SecurityError";
       setPackError(isSecurityError
@@ -1085,7 +1108,7 @@ export default function Home() {
   };
 
   const downloadMemePackArchive = async (format: "png" | "gif") => {
-    if (packSlices.length !== 12 || packDownloading) return;
+    if (packSlices.length !== selectedPackLayout.count || packDownloading) return;
     setPackDownloading(format);
     setPackDownloadProgress(0);
     setPackError("");
@@ -1102,13 +1125,13 @@ export default function Home() {
         await new Promise((resolve) => window.setTimeout(resolve, 0));
       }
 
-      const archive = await createMemePackArchive(files);
+      const archive = await createMemePackArchive(files, selectedPackLayout.count);
       setPackDownloadProgress(100);
       const blob = new Blob([archive.slice().buffer], { type: "application/zip" });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = `梗一下-12张人物表情包-${format.toUpperCase()}.zip`;
+      anchor.download = `梗一下-${selectedPackLayout.count}张人物表情包-${format.toUpperCase()}.zip`;
       anchor.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (error) {
@@ -1664,8 +1687,25 @@ export default function Home() {
               <div className="divider" />
               <div className="section-heading compact">
                 <span>2</span>
-                <div><h2>选择套装风格</h2><p>表情、动作和每格中文配字由 AI 自动创作</p></div>
+                <div><h2>选择套装规格</h2><p>从 4 张轻量套装到 16 张完整套装</p></div>
               </div>
+              <div className="pack-layout-grid" aria-label="选择人物表情套装规格">
+                {MEME_PACK_LAYOUTS.map((layout) => (
+                  <button
+                    type="button"
+                    key={layout.id}
+                    className={packLayoutId === layout.id ? "selected" : ""}
+                    onClick={() => selectPackLayout(layout.id)}
+                    disabled={packGenerating}
+                    aria-pressed={packLayoutId === layout.id}
+                  >
+                    <b>{layout.label}</b>
+                    <small>{layout.count} 张</small>
+                  </button>
+                ))}
+              </div>
+
+              <p className="mini-label pack-style-label">选择画风 · 表情、动作和配字由 AI 自动创作</p>
               <div className="image-style-grid pack-style-grid" aria-label="选择人物表情套装风格">
                 {[
                   ["sticker", "立体贴纸", "清晰 · 百搭"],
@@ -1694,7 +1734,7 @@ export default function Home() {
 
               <button className="button image-generate-button pack-generate-button" type="button" onClick={generateMemePack} disabled={!packPhotoFile || packGenerating}>
                 <span className="sparkle" aria-hidden="true">✦</span>
-                {packGenerating ? "正在创作 12 张表情，可能需要 1–2 分钟…" : "生成 12 张人物表情"}
+                {packGenerating ? `正在创作 ${selectedPackLayout.count} 张表情，可能需要 1–2 分钟…` : `生成 ${selectedPackLayout.count} 张人物表情`}
                 <span aria-hidden="true">→</span>
               </button>
               <button className="provider-shortcut" type="button" onClick={openSettings}>
@@ -1702,13 +1742,21 @@ export default function Home() {
                 <span>切换 →</span>
               </button>
               {packError && <p className="error-message">{packError}</p>}
-              <p className="reference-disclosure">人物照片只在生成时发送给当前 AI 服务。每格文字由 gpt-image-2 随表情创作；浏览器只按 3×4 切图并在本地打包。</p>
+              <p className="reference-disclosure">人物照片只在生成时发送给当前 AI 服务。每格文字由 gpt-image-2 随表情创作；浏览器只按所选网格切图并在本地打包。</p>
             </section>
 
             <section className="preview-panel pack-preview" aria-label="人物表情套装预览">
-              <div className="preview-title"><span>{packSlices.length === 12 ? "12 张已切好" : "人物表情套装"}</span><small>3 × 4 · 12 张</small></div>
-              <div className={`pack-stage ${packSlices.length === 12 ? "has-slices" : "empty"}`} aria-busy={packGenerating}>
-                {packSlices.length === 12 ? (
+              <div className="preview-title"><span>{packSlices.length === selectedPackLayout.count ? `${selectedPackLayout.count} 张已切好` : "人物表情套装"}</span><small>{selectedPackLayout.label} · {selectedPackLayout.count} 张</small></div>
+              <div
+                className={`pack-stage ${packSlices.length === selectedPackLayout.count ? "has-slices" : "empty"}`}
+                aria-busy={packGenerating}
+                style={{
+                  aspectRatio: `${selectedPackLayout.columns} / ${selectedPackLayout.rows}`,
+                  gridTemplateColumns: `repeat(${selectedPackLayout.columns}, minmax(0, 1fr))`,
+                  gridTemplateRows: `repeat(${selectedPackLayout.rows}, minmax(0, 1fr))`,
+                }}
+              >
+                {packSlices.length === selectedPackLayout.count ? (
                   packSlices.map((slice) => (
                     <figure className="pack-tile" key={slice.cell.index}>
                       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1718,18 +1766,25 @@ export default function Home() {
                   ))
                 ) : packImageUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img className="pack-sheet-image" src={packImageUrl} alt="AI 生成的 3×4 人物表情套装" />
+                  <img className="pack-sheet-image" src={packImageUrl} alt={`AI 生成的 ${selectedPackLayout.label} 人物表情套装`} />
                 ) : (
-                  <div className="pack-empty-grid" aria-hidden="true">
-                    {Array.from({ length: 12 }, (_, index) => <span key={index}>{index + 1}</span>)}
+                  <div
+                    className="pack-empty-grid"
+                    aria-hidden="true"
+                    style={{
+                      gridTemplateColumns: `repeat(${selectedPackLayout.columns}, minmax(0, 1fr))`,
+                      gridTemplateRows: `repeat(${selectedPackLayout.rows}, minmax(0, 1fr))`,
+                    }}
+                  >
+                    {Array.from({ length: selectedPackLayout.count }, (_, index) => <span key={index}>{index + 1}</span>)}
                   </div>
                 )}
                 {packGenerating && (
-                  <div className="generation-loader"><span>✦</span><b>AI 正在设计 12 个反应</b><small>每一格都会同时生成动作、表情和中文配字</small></div>
+                  <div className="generation-loader"><span>✦</span><b>AI 正在设计 {selectedPackLayout.count} 个反应</b><small>每一格都会同时生成动作、表情和中文配字</small></div>
                 )}
               </div>
 
-              {packSlices.length === 12 ? (
+              {packSlices.length === selectedPackLayout.count ? (
                 <>
                   <div className="image-result-meta pack-result-meta"><span>{packNotice || "切图完成 ✓"}</span><b>{packModel || "gpt-image-2"}</b></div>
                   <div className="pack-actions">
@@ -1740,14 +1795,14 @@ export default function Home() {
                       {packDownloading === "gif" ? `正在制作 GIF ${packDownloadProgress}%` : "下载 GIF 压缩包"} <span>↓</span>
                     </button>
                   </div>
-                  <p className="pack-download-note">每个压缩包包含 12 张独立文件；GIF 版会自动加入轻量循环动效。</p>
+                  <p className="pack-download-note">每个压缩包包含 {selectedPackLayout.count} 张独立文件；GIF 版会自动加入轻量循环动效。</p>
                   <div className="image-result-links pack-result-links">
                     <a className="text-button" href={packImageUrl} download="梗一下-人物表情套装原图.png">下载 AI 原始整图</a>
                     <button className="text-button" type="button" onClick={generateMemePack} disabled={packGenerating || Boolean(packDownloading)}>再生成一套</button>
                   </div>
                 </>
               ) : (
-                <p className="local-hint">✦ 上传照片后，AI 会一次生成 12 个常用聊天反应和匹配配字</p>
+                <p className="local-hint">✦ 上传照片后，AI 会一次生成 {selectedPackLayout.count} 个常用聊天反应和匹配配字</p>
               )}
             </section>
           </div>
