@@ -44,7 +44,7 @@ const MEME_PACK_SYSTEM_PROMPT = `
 2. 各格必须按从左到右、从上到下的顺序，分别覆盖“各格意图顺序”中的聊天表达，表情、动作和文案不得重复；你可以根据人物特征和对话场景调整成更自然的具体语气。
 3. 每格由你自行创作一句 2–6 个汉字的简短中文配字。配字必须与该格表情和动作匹配，清楚、准确、醒目，不得出现乱码、拼音、英文或重复文案。
 4. 所有文字必须完整放在各自格子的安全区域内，与人物和底边都留出明显间距，使用粗体高对比中文字体，在缩小后仍可辨认。
-5. 每格使用简洁独立背景，并保留清晰的切割边界；不要添加格子编号、总标题、说明文字、水印、二维码或品牌 Logo。
+5. 每格使用简洁独立背景，背景必须铺满各自的矩形格子直到切割线。禁止圆角卡片、卡片阴影、格子间留缝、白边、边框、分隔条和整图外边距；“安全区”只限制人物和文字，不能把格子缩成带留白的卡片。不要添加格子编号、总标题、说明文字、水印、二维码或品牌 Logo。
 6. 最终只输出一张符合本次套装规格的表情包大图，不要输出额外说明或单独图片。
 `.trim();
 
@@ -178,7 +178,10 @@ export async function handleGenerateMemePack(request: Request, env: MemeImageEnv
   const numberedIntents = plan.intents.map((intent, index) => secondReferenceImage
     ? `${index + 1}. 聊天意图：${intent}；双向互动动作：${duoInteractions[index]}。动作可按聊天意图调整，但必须保留一方发起、另一方回应的关系。`
     : `${index + 1}. ${intent}`).join("\n");
-  const fullPrompt = `${MEME_PACK_SYSTEM_PROMPT}\n\n${subjectInstruction}\n本次套装规格：严格 ${layout.columns} 列 × ${layout.rows} 行，共 ${layout.count} 个格子。\n套装主题：${plan.theme.label}（${plan.theme.description}）。${scenario ? `\n用户给出的对话或场景：${scenario}\n所有格子都要围绕这个场景形成不同而自然的回应。` : ""}\n各格意图顺序：\n${numberedIntents}\n视觉风格：${style}${preference ? `\n\n用户补充偏好：${preference}` : ""}`;
+  const verticalCuts = Array.from({ length: layout.columns - 1 }, (_, index) => `${(((index + 1) / layout.columns) * 100).toFixed(2)}%`).join("、");
+  const horizontalCuts = Array.from({ length: layout.rows - 1 }, (_, index) => `${(((index + 1) / layout.rows) * 100).toFixed(2)}%`).join("、");
+  const gridInstruction = `精确切割坐标：竖向切割边界必须位于画布宽度的 ${verticalCuts || "无"}；横向切割边界必须位于画布高度的 ${horizontalCuts || "无"}。这些边界是隐形坐标，不要画出线条；边界必须笔直贯穿整张画布且不得偏移。`;
+  const fullPrompt = `${MEME_PACK_SYSTEM_PROMPT}\n\n${subjectInstruction}\n本次套装规格：严格 ${layout.columns} 列 × ${layout.rows} 行，共 ${layout.count} 个格子。\n${gridInstruction}\n套装主题：${plan.theme.label}（${plan.theme.description}）。${scenario ? `\n用户给出的对话或场景：${scenario}\n所有格子都要围绕这个场景形成不同而自然的回应。` : ""}\n各格意图顺序：\n${numberedIntents}\n视觉风格：${style}${preference ? `\n\n用户补充偏好：${preference}` : ""}`;
   const endpoint = buildImageEndpoint(provider.baseUrl, "edits");
   const referenceImages = secondReferenceImage
     ? [referenceImage, secondReferenceImage]

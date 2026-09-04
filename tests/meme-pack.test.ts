@@ -3,6 +3,7 @@ import test from "node:test";
 import JSZip from "jszip";
 import {
   createMemePackArchive,
+  detectMemePackCells,
   getMemePackCells,
   getMemePackFilename,
   getMemePackLayout,
@@ -10,12 +11,50 @@ import {
   MEME_PACK_COUNT,
 } from "../lib/meme-pack";
 
+function createOffsetGridPixels(
+  width: number,
+  height: number,
+  xBoundaries: number[],
+  yBoundaries: number[],
+) {
+  const pixels = new Uint8ClampedArray(width * height * 4);
+  for (let row = 0; row < yBoundaries.length - 1; row += 1) {
+    for (let column = 0; column < xBoundaries.length - 1; column += 1) {
+      const red = 25 + column * 70;
+      const green = 30 + row * 50;
+      for (let y = yBoundaries[row]; y < yBoundaries[row + 1]; y += 1) {
+        for (let x = xBoundaries[column]; x < xBoundaries[column + 1]; x += 1) {
+          const offset = (y * width + x) * 4;
+          pixels[offset] = red;
+          pixels[offset + 1] = green;
+          pixels[offset + 2] = 180;
+          pixels[offset + 3] = 255;
+        }
+      }
+    }
+  }
+  return pixels;
+}
+
 test("splits a portrait sheet into a 3 by 4 grid", () => {
   const cells = getMemePackCells(1200, 1600);
 
   assert.equal(cells.length, 12);
   assert.deepEqual(cells[0], { index: 0, column: 0, row: 0, x: 0, y: 0, width: 400, height: 400 });
   assert.deepEqual(cells[11], { index: 11, column: 2, row: 3, x: 800, y: 1200, width: 400, height: 400 });
+});
+
+test("detects shifted AI grid boundaries instead of blindly slicing equal rows", () => {
+  const width = 120;
+  const height = 160;
+  const pixels = createOffsetGridPixels(width, height, [0, 38, 82, 120], [0, 46, 78, 126, 160]);
+  const cells = detectMemePackCells(pixels, width, height, 3, 4);
+
+  assert.equal(cells.length, 12);
+  assert.ok(cells[3].y >= 46, `second row should begin after the detected boundary, got ${cells[3].y}`);
+  assert.ok(cells[6].y >= 78, `third row should begin after the detected boundary, got ${cells[6].y}`);
+  assert.ok(cells[1].x >= 38, `second column should begin after the detected boundary, got ${cells[1].x}`);
+  assert.ok(cells[3].height < 40, `shifted row should not include the previous card, got ${cells[3].height}`);
 });
 
 test("supports 2x2, 3x3, 3x4, and 4x4 packs", () => {

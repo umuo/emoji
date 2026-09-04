@@ -69,6 +69,7 @@ test("keeps the image-generation model and privacy disclosure in the product UI"
   assert.match(packConfig, /3×4/);
   assert.match(packConfig, /4×4/);
   assert.match(page, /selectedPackLayout\.count/);
+  assert.match(page, /detectMemePackCells/);
   assert.match(page, /每格文字由 gpt-image-2 随表情创作/);
   assert.match(page, /添加搭档（双人互动）/);
   assert.match(page, /每格都有一方发起、另一方回应/);
@@ -99,6 +100,8 @@ test("keeps the image-generation model and privacy disclosure in the product UI"
   assert.match(imageHandler, /系统每次只生成 1 张整图/);
   assert.match(imageHandler, /禁止两人只是并排面向镜头/);
   assert.match(imageHandler, /外侧至少 8%/);
+  assert.match(imageHandler, /禁止圆角卡片/);
+  assert.match(imageHandler, /精确切割坐标/);
   assert.match(imageHandler, /images\/\$\{action\}/);
   assert.match(worker, /\/api\/generate-image/);
   assert.match(worker, /\/api\/generate-pack/);

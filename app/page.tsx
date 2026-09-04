@@ -28,7 +28,7 @@ import {
 } from "../lib/gif-effects";
 import {
   createMemePackArchive,
-  getMemePackCells,
+  detectMemePackCells,
   getMemePackFilename,
   getMemePackLayout,
   MEME_PACK_LAYOUTS,
@@ -1080,15 +1080,24 @@ export default function Home() {
 
     const createdUrls: string[] = [];
     try {
-      const nextSlices = await Promise.all(getMemePackCells(
+      const analysisCanvas = document.createElement("canvas");
+      analysisCanvas.width = source.naturalWidth;
+      analysisCanvas.height = source.naturalHeight;
+      const analysisContext = analysisCanvas.getContext("2d", { willReadFrequently: true });
+      if (!analysisContext) throw new Error("浏览器无法分析表情套装网格");
+      analysisContext.drawImage(source, 0, 0);
+      const pixels = analysisContext.getImageData(0, 0, source.naturalWidth, source.naturalHeight).data;
+      const detectedCells = detectMemePackCells(
+        pixels,
         source.naturalWidth,
         source.naturalHeight,
         layout.columns,
         layout.rows,
-      ).map(async (cell) => {
+      );
+      const nextSlices = await Promise.all(detectedCells.map(async (cell) => {
         const canvas = document.createElement("canvas");
-        canvas.width = Math.max(1, Math.round(cell.width));
-        canvas.height = Math.max(1, Math.round(cell.height));
+        canvas.width = Math.max(1, Math.round(source.naturalWidth / layout.columns));
+        canvas.height = Math.max(1, Math.round(source.naturalHeight / layout.rows));
         const context = canvas.getContext("2d");
         if (!context) throw new Error("浏览器无法创建切图画布");
         context.drawImage(

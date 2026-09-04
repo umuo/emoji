@@ -110,6 +110,11 @@ test("generates a 3 by 4 person expression sheet with model-authored captions", 
     assert.equal(upstream.get("quality"), "low");
     assert.equal(upstream.get("n"), null);
     assert.match(String(upstream.get("prompt")), /3 列 × 4 行/);
+    assert.match(String(upstream.get("prompt")), /竖向切割边界必须位于画布宽度的 33\.33%、66\.67%/);
+    assert.match(String(upstream.get("prompt")), /横向切割边界必须位于画布高度的 25\.00%、50\.00%、75\.00%/);
+    assert.match(String(upstream.get("prompt")), /边界是隐形坐标，不要画出线条/);
+    assert.match(String(upstream.get("prompt")), /禁止圆角卡片/);
+    assert.match(String(upstream.get("prompt")), /禁止.*格子间留缝/);
     assert.match(String(upstream.get("prompt")), /自行创作一句 2–6 个汉字/);
     assert.doesNotMatch(String(upstream.get("prompt")), /浏览器.*配字/);
     return new Response(JSON.stringify({ data: [{ b64_json: "AAAA" }] }), {
