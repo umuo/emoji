@@ -1,6 +1,6 @@
 import { isPrivateHostname, parseProvider, type ProviderConfig } from "./meme-ai";
 import { getMemePackLayout } from "./meme-pack-layouts";
-import { createMemePackIntentPlan } from "./meme-pack-themes";
+import { createDuoInteractionPlan, createMemePackIntentPlan } from "./meme-pack-themes";
 
 export type MemeImageEnv = {
   OPENAI_API_KEY?: string;
@@ -40,10 +40,10 @@ const MEME_PACK_SYSTEM_PROMPT = `
 你是一名中文社交表情包套装设计师。请把用户上传照片中的人物转化成一整张人物表情包分镜表，尽量保留脸型、发型、五官与可识别特征，同时把动作和情绪适度夸张。
 
 硬性要求：
-1. 必须严格遵守“本次套装规格”指定的列数、行数和总数，所有格子大小完全一致；每格人物都居中，任何人物、文字和装饰都不得跨越格子边界。
+1. 必须严格遵守“本次套装规格”指定的列数、行数和总数，所有格子大小完全一致。每格四周外侧至少 8% 必须是干净的背景安全区；人物的头发、脸、肩膀、手脚、衣服、道具、装饰和文字都不得进入安全区、触碰边界或被边界裁切。人物组合最多占格子宽度的 78% 和高度的 80%，使用留有呼吸感的中景构图。
 2. 各格必须按从左到右、从上到下的顺序，分别覆盖“各格意图顺序”中的聊天表达，表情、动作和文案不得重复；你可以根据人物特征和对话场景调整成更自然的具体语气。
 3. 每格由你自行创作一句 2–6 个汉字的简短中文配字。配字必须与该格表情和动作匹配，清楚、准确、醒目，不得出现乱码、拼音、英文或重复文案。
-4. 所有文字必须完整放在各自格子的安全区域内，使用粗体高对比中文字体，在缩小后仍可辨认。
+4. 所有文字必须完整放在各自格子的安全区域内，与人物和底边都留出明显间距，使用粗体高对比中文字体，在缩小后仍可辨认。
 5. 每格使用简洁独立背景，并保留清晰的切割边界；不要添加格子编号、总标题、说明文字、水印、二维码或品牌 Logo。
 6. 最终只输出一张符合本次套装规格的表情包大图，不要输出额外说明或单独图片。
 `.trim();
@@ -172,9 +172,12 @@ export async function handleGenerateMemePack(request: Request, env: MemeImageEnv
   const provider = providerResult.value;
   const imageModelName = provider.imageModelName || env.OPENAI_IMAGE_MODEL || "gpt-image-2";
   const subjectInstruction = secondReferenceImage
-    ? "主体模式：双人互动。参考图 1 与参考图 2 是两个不同人物；每格都要让两人同时出现并产生清楚、有趣的互动，分别保留两人的可识别特征，不能把两张脸融合成一个人。"
+    ? "主体模式：双人互动。参考图 1 与参考图 2 是两个不同人物，分别保留两人的可识别特征，不能把两张脸融合成一个人。每一格都必须是有因果关系的双人微场景：一人发起动作，另一人必须通过目光、手势、身体位移或接触作出明确回应；两人都要随格改变表情和姿势，并轮换动作发起者。禁止两人只是并排面向镜头各自做表情，禁止其中一人连续保持中性站姿或充当静止背景。"
     : "主体模式：单人。以参考图 1 中的人物为每一格的唯一主角，保持人物身份和外貌一致。";
-  const numberedIntents = plan.intents.map((intent, index) => `${index + 1}. ${intent}`).join("\n");
+  const duoInteractions = secondReferenceImage ? createDuoInteractionPlan(layout.count) : [];
+  const numberedIntents = plan.intents.map((intent, index) => secondReferenceImage
+    ? `${index + 1}. 聊天意图：${intent}；双向互动动作：${duoInteractions[index]}。动作可按聊天意图调整，但必须保留一方发起、另一方回应的关系。`
+    : `${index + 1}. ${intent}`).join("\n");
   const fullPrompt = `${MEME_PACK_SYSTEM_PROMPT}\n\n${subjectInstruction}\n本次套装规格：严格 ${layout.columns} 列 × ${layout.rows} 行，共 ${layout.count} 个格子。\n套装主题：${plan.theme.label}（${plan.theme.description}）。${scenario ? `\n用户给出的对话或场景：${scenario}\n所有格子都要围绕这个场景形成不同而自然的回应。` : ""}\n各格意图顺序：\n${numberedIntents}\n视觉风格：${style}${preference ? `\n\n用户补充偏好：${preference}` : ""}`;
   const endpoint = buildImageEndpoint(provider.baseUrl, "edits");
   const referenceImages = secondReferenceImage

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  createDuoInteractionPlan,
   createMemePackIntentPlan,
   getMemePackTheme,
   matchMemePackEffect,
@@ -16,6 +17,15 @@ test("every theme can fill every supported pack size", () => {
       assert.equal(plan.effects.length, count);
     }
   }
+});
+
+test("builds varied two-way interaction cues for a duo sheet", () => {
+  const interactions = createDuoInteractionPlan(12);
+  assert.equal(interactions.length, 12);
+  assert.equal(new Set(interactions).size, 12);
+  assert.match(interactions[0], /拉住另一人的手/);
+  assert.match(interactions[1], /另一人.*反应/);
+  assert.match(interactions[8], /两人面对面击掌/);
 });
 
 test("matches expression semantics to lightweight GIF effects", () => {

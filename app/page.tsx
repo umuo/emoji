@@ -1814,7 +1814,7 @@ export default function Home() {
                   <input type="file" accept="image/jpeg,image/png,image/webp" onChange={loadPackSecondPhoto} disabled={packGenerating} />
                   <span aria-hidden="true">＋</span>
                   <b>添加搭档（双人互动）</b>
-                  <small>可选 · 上传后每格让两人一起演</small>
+                  <small>可选 · 每格都有一方发起、另一方回应</small>
                 </label>
               )}
 

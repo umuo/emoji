@@ -186,6 +186,12 @@ test("sends two reference images and builds a themed interaction pack", async ()
     assert.match(String(upstream.get("prompt")), /套装主题：情侣互动/);
     assert.match(String(upstream.get("prompt")), /下班后去吃火锅吗/);
     assert.match(String(upstream.get("prompt")), /不能把两张脸融合成一个人/);
+    assert.match(String(upstream.get("prompt")), /一人发起动作，另一人必须/);
+    assert.match(String(upstream.get("prompt")), /禁止两人只是并排面向镜头/);
+    assert.match(String(upstream.get("prompt")), /双向互动动作/);
+    assert.match(String(upstream.get("prompt")), /一方发起、另一方回应/);
+    assert.match(String(upstream.get("prompt")), /外侧至少 8%/);
+    assert.match(String(upstream.get("prompt")), /最多占格子宽度的 78%/);
     return new Response(JSON.stringify({ data: [{ b64_json: "AAAA" }] }));
   };
 

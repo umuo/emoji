@@ -39,6 +39,25 @@ const themeIntents: Record<MemePackThemeId, string[]> = {
   ],
 };
 
+const duoInteractionCues = [
+  "一人兴奋拉住另一人的手，另一人身体前倾回应，双方看向彼此",
+  "一人凑近说悄悄话，另一人捂嘴笑或惊讶，形成明确反应",
+  "一人把手机或小道具递给另一人，另一人双手接住并回应",
+  "一人张开双臂发起拥抱，另一人靠近回抱",
+  "一人指向对方吐槽，另一人叉腰回瞪，形成来回互怼",
+  "两人背靠背生闷气，同时回头偷看对方",
+  "一人握住另一人的手臂求助，另一人拍肩或牵手回应",
+  "一人伸手挽留准备离开的对方，对方停步回头",
+  "两人面对面击掌或碰拳，动作在两人之间完成",
+  "一人故意搞怪逗人，另一人抬手制止但忍不住回应",
+  "一人递出礼物、零食或饮料，另一人伸手接住",
+  "一人拉着另一人一起往前跑，后者明确跟上",
+  "两人争抢同一个小道具，形成清楚的推拉关系",
+  "一人搂住另一人的肩膀，另一人自然靠近并回应",
+  "一人拿扩音器或话筒发起表达，另一人捂耳或接话",
+  "两人朝不同方向挥手告别，同时回头看向对方",
+] as const;
+
 export function getMemePackTheme(value: string | null | undefined): MemePackTheme {
   return MEME_PACK_THEMES.find((theme) => theme.id === value) ?? MEME_PACK_THEMES[0];
 }
@@ -63,4 +82,11 @@ export function createMemePackIntentPlan(
     intents,
     effects: intents.map(matchMemePackEffect),
   };
+}
+
+export function createDuoInteractionPlan(count: number) {
+  return Array.from(
+    { length: count },
+    (_, index) => duoInteractionCues[index % duoInteractionCues.length],
+  );
 }

@@ -71,6 +71,7 @@ test("keeps the image-generation model and privacy disclosure in the product UI"
   assert.match(page, /selectedPackLayout\.count/);
   assert.match(page, /每格文字由 gpt-image-2 随表情创作/);
   assert.match(page, /添加搭档（双人互动）/);
+  assert.match(page, /每格都有一方发起、另一方回应/);
   assert.match(page, /套装主题/);
   assert.match(page, /输入一句对话或场景/);
   assert.match(page, /AI 已智能匹配，可单独调整/);
@@ -94,6 +95,8 @@ test("keeps the image-generation model and privacy disclosure in the product UI"
   assert.match(imageHandler, /只创作社交表情包/);
   assert.match(imageHandler, /MEME_PACK_REQUEST_TIMEOUT_MS = 240000/);
   assert.match(imageHandler, /系统每次只生成 1 张整图/);
+  assert.match(imageHandler, /禁止两人只是并排面向镜头/);
+  assert.match(imageHandler, /外侧至少 8%/);
   assert.match(imageHandler, /images\/\$\{action\}/);
   assert.match(worker, /\/api\/generate-image/);
   assert.match(worker, /\/api\/generate-pack/);
