@@ -1906,7 +1906,7 @@ export default function Home() {
               >
                 <span className="sparkle" aria-hidden="true">✦</span>
                 {packGenerating
-                  ? `正在创作 ${selectedPackLayout.count} 张表情，可能需要 1–2 分钟…`
+                  ? `正在生成 1 张 ${selectedPackLayout.label} 整图，通常需要 1–3 分钟…`
                   : packSecondPhotoFile
                     ? `生成 ${selectedPackLayout.count} 张双人互动表情`
                     : `生成 ${selectedPackLayout.count} 张${MEME_PACK_THEMES.find((theme) => theme.id === packThemeId)?.label || "人物"}表情`}
@@ -1963,7 +1963,7 @@ export default function Home() {
                   </div>
                 )}
                 {packGenerating && (
-                  <div className="generation-loader"><span>✦</span><b>AI 正在设计 {selectedPackLayout.count} 个反应</b><small>每一格都会同时生成动作、表情和中文配字</small></div>
+                  <div className="generation-loader"><span>✦</span><b>AI 正在绘制 1 张 {selectedPackLayout.label} 整图</b><small>整图完成后，浏览器再把它切成 {selectedPackLayout.count} 张独立表情</small></div>
                 )}
               </div>
 

@@ -74,6 +74,8 @@ test("keeps the image-generation model and privacy disclosure in the product UI"
   assert.match(page, /套装主题/);
   assert.match(page, /输入一句对话或场景/);
   assert.match(page, /AI 已智能匹配，可单独调整/);
+  assert.match(page, /正在生成 1 张/);
+  assert.match(page, /整图完成后，浏览器再把它切成/);
   assert.match(page, /updatePackEffect/);
   assert.match(page, /form\.append\("image2"/);
   assert.match(themeConfig, /日常万能/);
@@ -90,6 +92,8 @@ test("keeps the image-generation model and privacy disclosure in the product UI"
   assert.match(page, /clearGifResult\(\);\s*setStillGifEffect/);
   assert.match(page, /ClipboardItem\.supports\("image\/gif"\)/);
   assert.match(imageHandler, /只创作社交表情包/);
+  assert.match(imageHandler, /MEME_PACK_REQUEST_TIMEOUT_MS = 240000/);
+  assert.match(imageHandler, /系统每次只生成 1 张整图/);
   assert.match(imageHandler, /images\/\$\{action\}/);
   assert.match(worker, /\/api\/generate-image/);
   assert.match(worker, /\/api\/generate-pack/);

@@ -100,11 +100,14 @@ test("rejects oversized or unsupported reference images before calling the provi
 test("generates a 3 by 4 person expression sheet with model-authored captions", async () => {
   const originalFetch = globalThis.fetch;
   let upstreamUrl = "";
+  let upstreamCalls = 0;
   globalThis.fetch = async (input, init) => {
+    upstreamCalls += 1;
     upstreamUrl = String(input);
     assert.ok(init?.body instanceof FormData);
     const upstream = init.body as FormData;
     assert.equal(upstream.get("size"), "1024x1536");
+    assert.equal(upstream.get("n"), null);
     assert.match(String(upstream.get("prompt")), /3 列 × 4 行/);
     assert.match(String(upstream.get("prompt")), /自行创作一句 2–6 个汉字/);
     assert.doesNotMatch(String(upstream.get("prompt")), /浏览器.*配字/);
@@ -134,11 +137,39 @@ test("generates a 3 by 4 person expression sheet with model-authored captions", 
 
     assert.equal(response.status, 200);
     assert.equal(upstreamUrl, "https://images.example.com/v1/images/edits");
+    assert.equal(upstreamCalls, 1);
     assert.equal(payload.imageUrl, "data:image/png;base64,AAAA");
     assert.equal(payload.referenceUsed, true);
     assert.equal(payload.subjectMode, "single");
     assert.equal(payload.effectPlan.length, 12);
     assert.equal(payload.reactionPlan.length, 12);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("describes a pack timeout as one sheet request followed by local slicing", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    const error = new Error("timed out");
+    error.name = "AbortError";
+    throw error;
+  };
+
+  try {
+    const form = new FormData();
+    form.append("image", new File(["person"], "person.png", { type: "image/png" }));
+    form.append("layout", "3x4");
+    form.append("provider", JSON.stringify(provider));
+    const response = await handleGenerateMemePack(new Request("https://site.example/api/generate-pack", {
+      method: "POST",
+      body: form,
+    }), {});
+    const payload = await response.json() as { error: string };
+
+    assert.equal(response.status, 504);
+    assert.match(payload.error, /只生成 1 张整图/);
+    assert.match(payload.error, /再切成 12 张/);
   } finally {
     globalThis.fetch = originalFetch;
   }

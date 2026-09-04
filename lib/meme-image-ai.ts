@@ -13,6 +13,9 @@ const jsonHeaders = {
   "cache-control": "no-store",
 };
 
+const DEFAULT_IMAGE_REQUEST_TIMEOUT_MS = 115000;
+const MEME_PACK_REQUEST_TIMEOUT_MS = 240000;
+
 const stylePrompts: Record<string, string> = {
   internet: "中文互联网斗图风，反应强烈，构图直接，笑点一眼能看懂",
   sticker: "精致立体贴纸风，角色轮廓清晰，适合聊天软件发送",
@@ -186,10 +189,18 @@ export async function handleGenerateMemePack(request: Request, env: MemeImageEnv
       fullPrompt,
       referenceImages,
       false,
-      { size: layout.size },
+      { size: layout.size, timeoutMs: MEME_PACK_REQUEST_TIMEOUT_MS },
     );
     if (!response.ok && [400, 415, 422].includes(response.status)) {
-      response = await callImageProvider(endpoint, provider, imageModelName, fullPrompt, referenceImages, true);
+      response = await callImageProvider(
+        endpoint,
+        provider,
+        imageModelName,
+        fullPrompt,
+        referenceImages,
+        true,
+        { timeoutMs: MEME_PACK_REQUEST_TIMEOUT_MS },
+      );
     }
     if (response.status >= 300 && response.status < 400) {
       return jsonError("生图接口返回了跳转响应，请在 Base URL 中填写最终 HTTPS 地址", 502);
@@ -219,7 +230,7 @@ export async function handleGenerateMemePack(request: Request, env: MemeImageEnv
     }), { headers: jsonHeaders });
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
-      return jsonError(`生成 ${layout.count} 张表情需要更久一点，请稍后重试`, 504);
+      return jsonError(`AI 生成这张 ${layout.label} 表情套装整图超时，请重试。系统每次只生成 1 张整图，完成后再切成 ${layout.count} 张。`, 504);
     }
     const message = error instanceof Error ? error.message : "生图接口连接失败";
     return jsonError(`表情套装生成失败：${message}`, 502);
@@ -263,10 +274,13 @@ async function callImageProvider(
   prompt: string,
   image: File | File[] | null,
   minimal: boolean,
-  options: { size?: string } = {},
+  options: { size?: string; timeoutMs?: number } = {},
 ) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 115000);
+  const timeout = setTimeout(
+    () => controller.abort(),
+    options.timeoutMs || DEFAULT_IMAGE_REQUEST_TIMEOUT_MS,
+  );
   const headers: Record<string, string> = {};
   if (provider.apiKey) headers.authorization = `Bearer ${provider.apiKey}`;
 
