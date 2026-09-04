@@ -1715,6 +1715,11 @@ input[type="range"] {
   padding-inline: 13px;
 }
 
+.pack-actions .static-gif-download {
+  grid-column: 1 / -1;
+  background: #f6f2e8;
+}
+
 .pack-download-note {
   width: 100%;
   margin: 10px auto 0;

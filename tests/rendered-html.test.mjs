@@ -59,7 +59,10 @@ test("keeps the image-generation model and privacy disclosure in the product UI"
   assert.match(page, /继续编辑/);
   assert.match(page, /制作动态 GIF/);
   assert.match(page, /下载 PNG 压缩包/);
-  assert.match(page, /下载 GIF 压缩包/);
+  assert.match(page, /下载动态 GIF 压缩包/);
+  assert.match(page, /下载静态 GIF 压缩包（无动画）/);
+  assert.match(page, /encodePackSliceStaticGif/);
+  assert.match(page, /format === "gif-static"/);
   assert.match(packConfig, /2×2/);
   assert.match(packConfig, /3×3/);
   assert.match(packConfig, /3×4/);

@@ -293,7 +293,7 @@ export default function Home() {
   const [packNotice, setPackNotice] = useState("");
   const [packSlices, setPackSlices] = useState<MemePackSlice[]>([]);
   const [packGenerating, setPackGenerating] = useState(false);
-  const [packDownloading, setPackDownloading] = useState<"png" | "gif" | "">("");
+  const [packDownloading, setPackDownloading] = useState<"png" | "gif" | "gif-static" | "">("");
   const [packDownloadProgress, setPackDownloadProgress] = useState(0);
   const [packError, setPackError] = useState("");
   const packPhotoObjectUrlRef = useRef("");
@@ -1107,7 +1107,20 @@ export default function Home() {
     return new Uint8Array(bytes);
   };
 
-  const downloadMemePackArchive = async (format: "png" | "gif") => {
+  const encodePackSliceStaticGif = async (slice: MemePackSlice) => {
+    const source = await loadCanvasImage(slice.url);
+    const { width, height } = fitGifDimensions(source.naturalWidth, source.naturalHeight, 360);
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) throw new Error("浏览器无法创建静态 GIF 画布");
+    context.drawImage(source, 0, 0, width, height);
+    const rgba = new Uint8Array(context.getImageData(0, 0, width, height).data.buffer);
+    return encodeStillImageGif(rgba, width, height);
+  };
+
+  const downloadMemePackArchive = async (format: "png" | "gif" | "gif-static") => {
     if (packSlices.length !== selectedPackLayout.count || packDownloading) return;
     setPackDownloading(format);
     setPackDownloadProgress(0);
@@ -1117,9 +1130,15 @@ export default function Home() {
       const files: Array<{ name: string; data: Blob | Uint8Array }> = [];
       for (let index = 0; index < packSlices.length; index += 1) {
         const slice = packSlices[index];
+        const extension = format === "png" ? "png" : "gif";
+        const data = format === "png"
+          ? slice.blob
+          : format === "gif-static"
+            ? await encodePackSliceStaticGif(slice)
+            : await encodePackSliceGif(slice, index);
         files.push({
-          name: getMemePackFilename(index, format),
-          data: format === "png" ? slice.blob : await encodePackSliceGif(slice, index),
+          name: getMemePackFilename(index, extension),
+          data,
         });
         setPackDownloadProgress(Math.round(((index + 1) / packSlices.length) * 88));
         await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -1131,7 +1150,8 @@ export default function Home() {
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = `梗一下-${selectedPackLayout.count}张人物表情包-${format.toUpperCase()}.zip`;
+      const archiveType = format === "png" ? "PNG" : format === "gif-static" ? "静态GIF" : "动态GIF";
+      anchor.download = `梗一下-${selectedPackLayout.count}张人物表情包-${archiveType}.zip`;
       anchor.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (error) {
@@ -1792,10 +1812,13 @@ export default function Home() {
                       {packDownloading === "png" ? `正在打包 ${packDownloadProgress}%` : "下载 PNG 压缩包"} <span>↓</span>
                     </button>
                     <button className="button secondary" type="button" onClick={() => downloadMemePackArchive("gif")} disabled={Boolean(packDownloading)}>
-                      {packDownloading === "gif" ? `正在制作 GIF ${packDownloadProgress}%` : "下载 GIF 压缩包"} <span>↓</span>
+                      {packDownloading === "gif" ? `正在制作动态 GIF ${packDownloadProgress}%` : "下载动态 GIF 压缩包"} <span>↓</span>
+                    </button>
+                    <button className="button secondary static-gif-download" type="button" onClick={() => downloadMemePackArchive("gif-static")} disabled={Boolean(packDownloading)}>
+                      {packDownloading === "gif-static" ? `正在制作静态 GIF ${packDownloadProgress}%` : "下载静态 GIF 压缩包（无动画）"} <span>↓</span>
                     </button>
                   </div>
-                  <p className="pack-download-note">每个压缩包包含 {selectedPackLayout.count} 张独立文件；GIF 版会自动加入轻量循环动效。</p>
+                  <p className="pack-download-note">每个压缩包包含 {selectedPackLayout.count} 张独立文件；动态版保留轻量循环动效，静态版每张只有一帧、完全不动。</p>
                   <div className="image-result-links pack-result-links">
                     <a className="text-button" href={packImageUrl} download="梗一下-人物表情套装原图.png">下载 AI 原始整图</a>
                     <button className="text-button" type="button" onClick={generateMemePack} disabled={packGenerating || Boolean(packDownloading)}>再生成一套</button>
