@@ -32,6 +32,7 @@ import {
   getMemePackCanvasAspectRatio,
   getMemePackFilename,
   getMemePackLayout,
+  getMemePackSourceAspectRatio,
   MEME_PACK_LAYOUTS,
   type MemePackCell,
   type MemePackLayout,
@@ -313,6 +314,7 @@ export default function Home() {
   const [packModel, setPackModel] = useState("");
   const [packNotice, setPackNotice] = useState("");
   const [packSlices, setPackSlices] = useState<MemePackSlice[]>([]);
+  const [packCanvasAspectRatio, setPackCanvasAspectRatio] = useState(2 / 3);
   const [packEffects, setPackEffects] = useState<MemePackEffect[]>([]);
   const [packReactionPlan, setPackReactionPlan] = useState<string[]>([]);
   const [selectedPackSliceIndex, setSelectedPackSliceIndex] = useState(0);
@@ -1078,6 +1080,7 @@ export default function Home() {
     if (!source.naturalWidth || !source.naturalHeight) {
       throw new Error("表情套装图片尚未加载完成，请稍后再试");
     }
+    const sourceAspectRatio = getMemePackSourceAspectRatio(source.naturalWidth, source.naturalHeight);
 
     const createdUrls: string[] = [];
     try {
@@ -1125,6 +1128,7 @@ export default function Home() {
 
       clearPackSlices();
       packSliceObjectUrlsRef.current = createdUrls;
+      setPackCanvasAspectRatio(sourceAspectRatio);
       setPackSlices(nextSlices.sort((a, b) => a.cell.index - b.cell.index));
       const allowedEffects = new Set(PACK_EFFECT_OPTIONS.map((effect) => effect.id));
       setPackEffects(Array.from({ length: layout.count }, (_, index) => {
@@ -1936,7 +1940,9 @@ export default function Home() {
                 className={`pack-stage ${packSlices.length === selectedPackLayout.count ? "has-slices" : "empty"}`}
                 aria-busy={packGenerating}
                 style={{
-                  aspectRatio: getMemePackCanvasAspectRatio(selectedPackLayout),
+                  aspectRatio: packSlices.length === selectedPackLayout.count
+                    ? packCanvasAspectRatio
+                    : getMemePackCanvasAspectRatio(selectedPackLayout),
                   gridTemplateColumns: `repeat(${selectedPackLayout.columns}, minmax(0, 1fr))`,
                   gridTemplateRows: `repeat(${selectedPackLayout.rows}, minmax(0, 1fr))`,
                 }}

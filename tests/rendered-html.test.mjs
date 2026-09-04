@@ -71,7 +71,8 @@ test("keeps the image-generation model and privacy disclosure in the product UI"
   assert.match(packConfig, /4×4/);
   assert.match(page, /selectedPackLayout\.count/);
   assert.match(page, /detectMemePackCells/);
-  assert.match(page, /getMemePackCanvasAspectRatio\(selectedPackLayout\)/);
+  assert.match(page, /getMemePackSourceAspectRatio\(source\.naturalWidth, source\.naturalHeight\)/);
+  assert.match(page, /packSlices\.length === selectedPackLayout\.count[\s\S]*?packCanvasAspectRatio[\s\S]*?getMemePackCanvasAspectRatio\(selectedPackLayout\)/);
   assert.match(styles, /\.pack-tile img,[\s\S]*?object-fit: contain;/);
   assert.match(page, /每格文字由 gpt-image-2 随表情创作/);
   assert.match(page, /添加搭档（双人互动）/);

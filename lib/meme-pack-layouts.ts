@@ -21,3 +21,10 @@ export function getMemePackCanvasAspectRatio(layout: MemePackLayout) {
   if (!width || !height) throw new Error("表情包画布尺寸无效");
   return width / height;
 }
+
+export function getMemePackSourceAspectRatio(width: number, height: number) {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    throw new Error("表情包原图尺寸无效");
+  }
+  return width / height;
+}

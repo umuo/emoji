@@ -8,6 +8,7 @@ import {
   getMemePackCells,
   getMemePackFilename,
   getMemePackLayout,
+  getMemePackSourceAspectRatio,
   MEME_PACK_LAYOUTS,
   MEME_PACK_COUNT,
 } from "../lib/meme-pack";
@@ -83,6 +84,12 @@ test("uses the requested AI canvas ratio instead of forcing every preview tile s
   assert.equal(getMemePackCanvasAspectRatio(getMemePackLayout("2x2")), 1);
   assert.equal(getMemePackCanvasAspectRatio(getMemePackLayout("3x3")), 1);
   assert.equal(getMemePackCanvasAspectRatio(getMemePackLayout("4x4")), 1);
+});
+
+test("adapts the preview to the dimensions the image provider actually returned", () => {
+  assert.equal(getMemePackSourceAspectRatio(1024, 1024), 1);
+  assert.equal(getMemePackSourceAspectRatio(1024, 1536), 2 / 3);
+  assert.throws(() => getMemePackSourceAspectRatio(0, 1024), /原图尺寸无效/);
 });
 
 test("supports 2x2, 3x3, 3x4, and 4x4 packs", () => {
