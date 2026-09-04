@@ -183,6 +183,7 @@ export async function handleGenerateMemePack(request: Request, env: MemeImageEnv
   const referenceImages = secondReferenceImage
     ? [referenceImage, secondReferenceImage]
     : referenceImage;
+  const packQuality = layout.count >= 12 ? "low" : "medium";
 
   try {
     let response = await callImageProvider(
@@ -192,7 +193,7 @@ export async function handleGenerateMemePack(request: Request, env: MemeImageEnv
       fullPrompt,
       referenceImages,
       false,
-      { size: layout.size, timeoutMs: MEME_PACK_REQUEST_TIMEOUT_MS },
+      { size: layout.size, timeoutMs: MEME_PACK_REQUEST_TIMEOUT_MS, quality: packQuality },
     );
     if (!response.ok && [400, 415, 422].includes(response.status)) {
       response = await callImageProvider(
@@ -207,6 +208,9 @@ export async function handleGenerateMemePack(request: Request, env: MemeImageEnv
     }
     if (response.status >= 300 && response.status < 400) {
       return jsonError("生图接口返回了跳转响应，请在 Base URL 中填写最终 HTTPS 地址", 502);
+    }
+    if (response.status === 524) {
+      return jsonError(`上游生图服务生成这张 ${layout.label} 整图时超时（524）。本站已按快速模式请求 1 张整图，请重试；若上游仍繁忙，可暂时选择 2×2 或 3×3。`, 504);
     }
     if (!response.ok) {
       const providerError = await readProviderError(response, provider.apiKey);
@@ -277,7 +281,7 @@ async function callImageProvider(
   prompt: string,
   image: File | File[] | null,
   minimal: boolean,
-  options: { size?: string; timeoutMs?: number } = {},
+  options: { size?: string; timeoutMs?: number; quality?: "low" | "medium" } = {},
 ) {
   const controller = new AbortController();
   const timeout = setTimeout(
@@ -299,7 +303,7 @@ async function callImageProvider(
     });
     if (!minimal) {
       upstream.append("size", options.size || "1024x1024");
-      upstream.append("quality", "medium");
+      upstream.append("quality", options.quality || "medium");
     }
     body = upstream;
   } else {
@@ -307,7 +311,7 @@ async function callImageProvider(
     body = JSON.stringify({
       model,
       prompt,
-      ...(!minimal ? { size: options.size || "1024x1024", quality: "medium" } : {}),
+      ...(!minimal ? { size: options.size || "1024x1024", quality: options.quality || "medium" } : {}),
     });
   }
 

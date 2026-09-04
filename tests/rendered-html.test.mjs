@@ -94,6 +94,8 @@ test("keeps the image-generation model and privacy disclosure in the product UI"
   assert.match(page, /ClipboardItem\.supports\("image\/gif"\)/);
   assert.match(imageHandler, /只创作社交表情包/);
   assert.match(imageHandler, /MEME_PACK_REQUEST_TIMEOUT_MS = 240000/);
+  assert.match(imageHandler, /layout\.count >= 12 \? "low" : "medium"/);
+  assert.match(imageHandler, /上游生图服务生成这张/);
   assert.match(imageHandler, /系统每次只生成 1 张整图/);
   assert.match(imageHandler, /禁止两人只是并排面向镜头/);
   assert.match(imageHandler, /外侧至少 8%/);

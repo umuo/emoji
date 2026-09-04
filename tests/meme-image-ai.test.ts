@@ -107,6 +107,7 @@ test("generates a 3 by 4 person expression sheet with model-authored captions", 
     assert.ok(init?.body instanceof FormData);
     const upstream = init.body as FormData;
     assert.equal(upstream.get("size"), "1024x1536");
+    assert.equal(upstream.get("quality"), "low");
     assert.equal(upstream.get("n"), null);
     assert.match(String(upstream.get("prompt")), /3 列 × 4 行/);
     assert.match(String(upstream.get("prompt")), /自行创作一句 2–6 个汉字/);
@@ -143,6 +144,30 @@ test("generates a 3 by 4 person expression sheet with model-authored captions", 
     assert.equal(payload.subjectMode, "single");
     assert.equal(payload.effectPlan.length, 12);
     assert.equal(payload.reactionPlan.length, 12);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("returns a useful message when the upstream image gateway times out", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("upstream timeout", { status: 524 });
+
+  try {
+    const form = new FormData();
+    form.append("image", new File(["person"], "person.png", { type: "image/png" }));
+    form.append("layout", "3x4");
+    form.append("provider", JSON.stringify(provider));
+    const response = await handleGenerateMemePack(new Request("https://site.example/api/generate-pack", {
+      method: "POST",
+      body: form,
+    }), {});
+    const payload = await response.json() as { error: string };
+
+    assert.equal(response.status, 504);
+    assert.match(payload.error, /上游生图服务/);
+    assert.match(payload.error, /快速模式请求 1 张整图/);
+    assert.match(payload.error, /2×2 或 3×3/);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -245,6 +270,7 @@ test("uses a square canvas and 16 reactions for the 4x4 pack", async () => {
   globalThis.fetch = async (_input, init) => {
     const upstream = init?.body as FormData;
     assert.equal(upstream.get("size"), "1024x1024");
+    assert.equal(upstream.get("quality"), "low");
     assert.match(String(upstream.get("prompt")), /4 列 × 4 行，共 16 个格子/);
     assert.match(String(upstream.get("prompt")), /求求了/);
     return new Response(JSON.stringify({ data: [{ b64_json: "AAAA" }] }));
