@@ -42,7 +42,7 @@ export function getMemePackCells(
   });
 }
 
-function scoreGridBoundary(
+function analyzeGridBoundary(
   pixels: Uint8ClampedArray,
   width: number,
   height: number,
@@ -81,13 +81,18 @@ function scoreGridBoundary(
     samples += 1;
   }
 
-  if (!samples) return 0;
+  if (!samples) return { score: 0, edgeCoverage: 0, luminanceDeviation: Number.POSITIVE_INFINITY };
   const differenceAverage = differenceTotal / samples;
   const strongEdgeCoverage = strongEdges / samples;
   const luminanceAverage = luminanceTotal / samples;
   const variance = Math.max(0, luminanceSquaredTotal / samples - luminanceAverage ** 2);
-  const uniformLineBonus = Math.max(0, 30 - Math.sqrt(variance)) * 0.8;
-  return differenceAverage + strongEdgeCoverage * 80 + uniformLineBonus;
+  const luminanceDeviation = Math.sqrt(variance);
+  const uniformLineBonus = Math.max(0, 30 - luminanceDeviation) * 0.8;
+  return {
+    score: differenceAverage + strongEdgeCoverage * 180 + uniformLineBonus,
+    edgeCoverage: strongEdgeCoverage,
+    luminanceDeviation,
+  };
 }
 
 function detectAxisBoundaries(
@@ -99,7 +104,7 @@ function detectAxisBoundaries(
 ) {
   const length = axis === "x" ? width : height;
   const nominalSize = length / segments;
-  const searchRadius = Math.max(2, Math.round(nominalSize * 0.16));
+  const searchRadius = Math.max(2, Math.round(nominalSize * 0.1));
   const boundaries = [0];
 
   for (let index = 1; index < segments; index += 1) {
@@ -107,12 +112,16 @@ function detectAxisBoundaries(
     const start = Math.max(1, expected - searchRadius);
     const end = Math.min(length - 1, expected + searchRadius);
     let bestPosition = expected;
-    let bestScore = scoreGridBoundary(pixels, width, height, expected, axis);
+    let bestScore = analyzeGridBoundary(pixels, width, height, expected, axis).score;
 
     for (let position = start; position <= end; position += 1) {
-      const distancePenalty = Math.abs(position - expected) / searchRadius * 4;
-      const score = scoreGridBoundary(pixels, width, height, position, axis) - distancePenalty;
-      if (score > bestScore + 0.5) {
+      const analysis = analyzeGridBoundary(pixels, width, height, position, axis);
+      const isContinuousBoundary = analysis.edgeCoverage >= 0.7;
+      const isUniformSeparator = analysis.luminanceDeviation <= 8;
+      if (!isContinuousBoundary && !isUniformSeparator) continue;
+      const distancePenalty = Math.abs(position - expected) / searchRadius * 8;
+      const score = analysis.score - distancePenalty;
+      if (score > bestScore + 12) {
         bestScore = score;
         bestPosition = position;
       }

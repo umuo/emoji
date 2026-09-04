@@ -20,14 +20,14 @@ function createOffsetGridPixels(
   const pixels = new Uint8ClampedArray(width * height * 4);
   for (let row = 0; row < yBoundaries.length - 1; row += 1) {
     for (let column = 0; column < xBoundaries.length - 1; column += 1) {
-      const red = 25 + column * 70;
+      const red = 25 + column * 100;
       const green = 30 + row * 50;
       for (let y = yBoundaries[row]; y < yBoundaries[row + 1]; y += 1) {
         for (let x = xBoundaries[column]; x < xBoundaries[column + 1]; x += 1) {
           const offset = (y * width + x) * 4;
           pixels[offset] = red;
           pixels[offset + 1] = green;
-          pixels[offset + 2] = 180;
+          pixels[offset + 2] = 25 + row * 70;
           pixels[offset + 3] = 255;
         }
       }
@@ -47,14 +47,34 @@ test("splits a portrait sheet into a 3 by 4 grid", () => {
 test("detects shifted AI grid boundaries instead of blindly slicing equal rows", () => {
   const width = 120;
   const height = 160;
-  const pixels = createOffsetGridPixels(width, height, [0, 38, 82, 120], [0, 46, 78, 126, 160]);
+  const pixels = createOffsetGridPixels(width, height, [0, 38, 82, 120], [0, 44, 78, 124, 160]);
   const cells = detectMemePackCells(pixels, width, height, 3, 4);
 
   assert.equal(cells.length, 12);
-  assert.ok(cells[3].y >= 46, `second row should begin after the detected boundary, got ${cells[3].y}`);
+  assert.ok(cells[3].y >= 44, `second row should begin after the detected boundary, got ${cells[3].y}`);
   assert.ok(cells[6].y >= 78, `third row should begin after the detected boundary, got ${cells[6].y}`);
   assert.ok(cells[1].x >= 38, `second column should begin after the detected boundary, got ${cells[1].x}`);
   assert.ok(cells[3].height < 40, `shifted row should not include the previous card, got ${cells[3].height}`);
+});
+
+test("does not mistake a partial-width caption edge for a row boundary", () => {
+  const width = 120;
+  const height = 160;
+  const pixels = createOffsetGridPixels(width, height, [0, 40, 80, 120], [0, 40, 80, 120, 160]);
+  for (const captionY of [35, 75, 115]) {
+    for (let x = 0; x < width; x += 1) {
+      if (x % 8 > 1) continue;
+      const offset = (captionY * width + x) * 4;
+      pixels[offset] = 0;
+      pixels[offset + 1] = 0;
+      pixels[offset + 2] = 0;
+    }
+  }
+
+  const cells = detectMemePackCells(pixels, width, height, 3, 4);
+  assert.equal(cells[3].y, 41);
+  assert.equal(cells[6].y, 81);
+  assert.equal(cells[9].y, 121);
 });
 
 test("supports 2x2, 3x3, 3x4, and 4x4 packs", () => {
