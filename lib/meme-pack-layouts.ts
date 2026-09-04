@@ -15,3 +15,9 @@ export type MemePackLayout = (typeof MEME_PACK_LAYOUTS)[number];
 export function getMemePackLayout(value: string | null | undefined): MemePackLayout {
   return MEME_PACK_LAYOUTS.find((layout) => layout.id === value) ?? MEME_PACK_LAYOUTS[2];
 }
+
+export function getMemePackCanvasAspectRatio(layout: MemePackLayout) {
+  const [width, height] = layout.size.split("x").map(Number);
+  if (!width || !height) throw new Error("表情包画布尺寸无效");
+  return width / height;
+}

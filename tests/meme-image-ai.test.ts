@@ -222,6 +222,8 @@ test("sends two reference images and builds a themed interaction pack", async ()
     assert.match(String(upstream.get("prompt")), /一方发起、另一方回应/);
     assert.match(String(upstream.get("prompt")), /外侧至少 8%/);
     assert.match(String(upstream.get("prompt")), /最多占格子宽度的 78%/);
+    assert.match(String(upstream.get("prompt")), /每格下方 20% 必须专门留给完整配字/);
+    assert.match(String(upstream.get("prompt")), /配字底部不得低于格子高度的 88%/);
     return new Response(JSON.stringify({ data: [{ b64_json: "AAAA" }] }));
   };
 

@@ -4,6 +4,7 @@ import JSZip from "jszip";
 import {
   createMemePackArchive,
   detectMemePackCells,
+  getMemePackCanvasAspectRatio,
   getMemePackCells,
   getMemePackFilename,
   getMemePackLayout,
@@ -72,9 +73,16 @@ test("does not mistake a partial-width caption edge for a row boundary", () => {
   }
 
   const cells = detectMemePackCells(pixels, width, height, 3, 4);
-  assert.equal(cells[3].y, 41);
-  assert.equal(cells[6].y, 81);
-  assert.equal(cells[9].y, 121);
+  assert.equal(cells[3].y, 40);
+  assert.equal(cells[6].y, 80);
+  assert.equal(cells[9].y, 120);
+});
+
+test("uses the requested AI canvas ratio instead of forcing every preview tile square", () => {
+  assert.equal(getMemePackCanvasAspectRatio(getMemePackLayout("3x4")), 2 / 3);
+  assert.equal(getMemePackCanvasAspectRatio(getMemePackLayout("2x2")), 1);
+  assert.equal(getMemePackCanvasAspectRatio(getMemePackLayout("3x3")), 1);
+  assert.equal(getMemePackCanvasAspectRatio(getMemePackLayout("4x4")), 1);
 });
 
 test("supports 2x2, 3x3, 3x4, and 4x4 packs", () => {

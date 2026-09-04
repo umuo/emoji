@@ -41,12 +41,13 @@ test("server-renders the meme creator", async () => {
 });
 
 test("keeps the image-generation model and privacy disclosure in the product UI", async () => {
-  const [page, imageHandler, packConfig, themeConfig, worker] = await Promise.all([
+  const [page, imageHandler, packConfig, themeConfig, worker, styles] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../lib/meme-image-ai.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/meme-pack-layouts.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/meme-pack-themes.ts", import.meta.url), "utf8"),
     readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /gpt-image-2/);
@@ -70,6 +71,8 @@ test("keeps the image-generation model and privacy disclosure in the product UI"
   assert.match(packConfig, /4×4/);
   assert.match(page, /selectedPackLayout\.count/);
   assert.match(page, /detectMemePackCells/);
+  assert.match(page, /getMemePackCanvasAspectRatio\(selectedPackLayout\)/);
+  assert.match(styles, /\.pack-tile img,[\s\S]*?object-fit: contain;/);
   assert.match(page, /每格文字由 gpt-image-2 随表情创作/);
   assert.match(page, /添加搭档（双人互动）/);
   assert.match(page, /每格都有一方发起、另一方回应/);

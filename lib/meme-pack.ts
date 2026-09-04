@@ -116,9 +116,8 @@ function detectAxisBoundaries(
 
     for (let position = start; position <= end; position += 1) {
       const analysis = analyzeGridBoundary(pixels, width, height, position, axis);
-      const isContinuousBoundary = analysis.edgeCoverage >= 0.7;
-      const isUniformSeparator = analysis.luminanceDeviation <= 8;
-      if (!isContinuousBoundary && !isUniformSeparator) continue;
+      const isContinuousBoundary = analysis.edgeCoverage >= 0.85;
+      if (!isContinuousBoundary) continue;
       const distancePenalty = Math.abs(position - expected) / searchRadius * 8;
       const score = analysis.score - distancePenalty;
       if (score > bestScore + 12) {
@@ -157,14 +156,12 @@ export function detectMemePackCells(
     if (detectedWidth < width / columns * 0.6 || detectedHeight < height / rows * 0.6) {
       return fallback;
     }
-    const trimX = Math.max(1, Math.round(detectedWidth * 0.015));
-    const trimY = Math.max(1, Math.round(detectedHeight * 0.015));
     return {
       ...fallback,
-      x: left + trimX,
-      y: top + trimY,
-      width: detectedWidth - trimX * 2,
-      height: detectedHeight - trimY * 2,
+      x: left,
+      y: top,
+      width: detectedWidth,
+      height: detectedHeight,
     };
   });
 }

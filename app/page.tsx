@@ -29,6 +29,7 @@ import {
 import {
   createMemePackArchive,
   detectMemePackCells,
+  getMemePackCanvasAspectRatio,
   getMemePackFilename,
   getMemePackLayout,
   MEME_PACK_LAYOUTS,
@@ -1935,7 +1936,7 @@ export default function Home() {
                 className={`pack-stage ${packSlices.length === selectedPackLayout.count ? "has-slices" : "empty"}`}
                 aria-busy={packGenerating}
                 style={{
-                  aspectRatio: `${selectedPackLayout.columns} / ${selectedPackLayout.rows}`,
+                  aspectRatio: getMemePackCanvasAspectRatio(selectedPackLayout),
                   gridTemplateColumns: `repeat(${selectedPackLayout.columns}, minmax(0, 1fr))`,
                   gridTemplateRows: `repeat(${selectedPackLayout.rows}, minmax(0, 1fr))`,
                 }}

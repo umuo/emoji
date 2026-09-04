@@ -172,7 +172,7 @@ export async function handleGenerateMemePack(request: Request, env: MemeImageEnv
   const provider = providerResult.value;
   const imageModelName = provider.imageModelName || env.OPENAI_IMAGE_MODEL || "gpt-image-2";
   const subjectInstruction = secondReferenceImage
-    ? "主体模式：双人互动。参考图 1 与参考图 2 是两个不同人物，分别保留两人的可识别特征，不能把两张脸融合成一个人。每一格都必须是有因果关系的双人微场景：一人发起动作，另一人必须通过目光、手势、身体位移或接触作出明确回应；两人都要随格改变表情和姿势，并轮换动作发起者。禁止两人只是并排面向镜头各自做表情，禁止其中一人连续保持中性站姿或充当静止背景。"
+    ? "主体模式：双人互动。参考图 1 与参考图 2 是两个不同人物，分别保留两人的可识别特征，不能把两张脸融合成一个人。每一格都必须是有因果关系的双人微场景：一人发起动作，另一人必须通过目光、手势、身体位移或接触作出明确回应；两人都要随格改变表情和姿势，并轮换动作发起者。禁止两人只是并排面向镜头各自做表情，禁止其中一人连续保持中性站姿或充当静止背景。双人更容易挤满画面，因此每格下方 20% 必须专门留给完整配字，配字底部不得低于格子高度的 88%；两个人物及互动道具整体必须收在格子中上部，不得占用相邻格子或跨越切割坐标。"
     : "主体模式：单人。以参考图 1 中的人物为每一格的唯一主角，保持人物身份和外貌一致。";
   const duoInteractions = secondReferenceImage ? createDuoInteractionPlan(layout.count) : [];
   const numberedIntents = plan.intents.map((intent, index) => secondReferenceImage
