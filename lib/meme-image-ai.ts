@@ -1,5 +1,6 @@
 import { isPrivateHostname, parseProvider, type ProviderConfig } from "./meme-ai";
 import { getMemePackLayout } from "./meme-pack-layouts";
+import { createMemePackIntentPlan } from "./meme-pack-themes";
 
 export type MemeImageEnv = {
   OPENAI_API_KEY?: string;
@@ -33,21 +34,16 @@ const MEME_IMAGE_SYSTEM_PROMPT = `
 `.trim();
 
 const MEME_PACK_SYSTEM_PROMPT = `
-你是一名中文社交表情包套装设计师。请以用户上传照片中的人物为唯一主角，生成一整张人物表情包分镜表，尽量保留脸型、发型、五官与可识别特征，同时把动作和情绪适度夸张。
+你是一名中文社交表情包套装设计师。请把用户上传照片中的人物转化成一整张人物表情包分镜表，尽量保留脸型、发型、五官与可识别特征，同时把动作和情绪适度夸张。
 
 硬性要求：
 1. 必须严格遵守“本次套装规格”指定的列数、行数和总数，所有格子大小完全一致；每格人物都居中，任何人物、文字和装饰都不得跨越格子边界。
-2. 各格分别覆盖“本次情绪范围”中的常用聊天表达，表情、动作和文案不得重复；你可以根据人物特征调整成更自然的具体语气。
+2. 各格必须按从左到右、从上到下的顺序，分别覆盖“各格意图顺序”中的聊天表达，表情、动作和文案不得重复；你可以根据人物特征和对话场景调整成更自然的具体语气。
 3. 每格由你自行创作一句 2–6 个汉字的简短中文配字。配字必须与该格表情和动作匹配，清楚、准确、醒目，不得出现乱码、拼音、英文或重复文案。
 4. 所有文字必须完整放在各自格子的安全区域内，使用粗体高对比中文字体，在缩小后仍可辨认。
 5. 每格使用简洁独立背景，并保留清晰的切割边界；不要添加格子编号、总标题、说明文字、水印、二维码或品牌 Logo。
 6. 最终只输出一张符合本次套装规格的表情包大图，不要输出额外说明或单独图片。
 `.trim();
-
-const memePackReactions = [
-  "收到", "大笑", "无语", "感谢", "赞同", "生气", "拒绝", "鼓励",
-  "询问", "晚安", "马上到", "告别", "震惊", "委屈", "得意", "求求了",
-];
 
 export async function handleGenerateMemeImage(request: Request, env: MemeImageEnv): Promise<Response> {
   if (request.method !== "POST") return jsonError("只支持 POST 请求", 405);
@@ -141,19 +137,46 @@ export async function handleGenerateMemePack(request: Request, env: MemeImageEnv
   if (referenceImage.size > 10 * 1024 * 1024) {
     return jsonError("人物照片请控制在 10 MB 以内", 400);
   }
+  const secondImageEntry = form.get("image2");
+  const secondReferenceImage = secondImageEntry && typeof secondImageEntry !== "string" ? secondImageEntry : null;
+  if (secondReferenceImage) {
+    if (!new Set(["image/png", "image/jpeg", "image/webp"]).has(secondReferenceImage.type)) {
+      return jsonError("搭档照片仅支持 PNG、JPG 或 WEBP", 400);
+    }
+    if (secondReferenceImage.size > 10 * 1024 * 1024) {
+      return jsonError("搭档照片请控制在 10 MB 以内", 400);
+    }
+  }
 
   const preference = typeof form.get("prompt") === "string"
     ? String(form.get("prompt")).trim().slice(0, 300)
     : "";
+  const scenario = typeof form.get("scenario") === "string"
+    ? String(form.get("scenario")).trim().slice(0, 300)
+    : "";
   const styleId = typeof form.get("style") === "string" ? String(form.get("style")) : "sticker";
   const style = stylePrompts[styleId] || stylePrompts.sticker;
   const layout = getMemePackLayout(typeof form.get("layout") === "string" ? String(form.get("layout")) : null);
+  const plan = createMemePackIntentPlan(
+    typeof form.get("theme") === "string" ? String(form.get("theme")) : null,
+    layout.count,
+  );
+  if (plan.theme.id === "scenario" && scenario.length < 2) {
+    return jsonError("请先输入一句对话或场景", 400);
+  }
   const providerResult = resolveProvider(form.get("provider"), env);
   if ("error" in providerResult) return jsonError(providerResult.error || "自定义接口设置不完整", 400);
   const provider = providerResult.value;
   const imageModelName = provider.imageModelName || env.OPENAI_IMAGE_MODEL || "gpt-image-2";
-  const fullPrompt = `${MEME_PACK_SYSTEM_PROMPT}\n\n本次套装规格：严格 ${layout.columns} 列 × ${layout.rows} 行，共 ${layout.count} 个格子。\n本次情绪范围：${memePackReactions.slice(0, layout.count).join("、")}。\n视觉风格：${style}${preference ? `\n\n用户补充偏好：${preference}` : ""}`;
+  const subjectInstruction = secondReferenceImage
+    ? "主体模式：双人互动。参考图 1 与参考图 2 是两个不同人物；每格都要让两人同时出现并产生清楚、有趣的互动，分别保留两人的可识别特征，不能把两张脸融合成一个人。"
+    : "主体模式：单人。以参考图 1 中的人物为每一格的唯一主角，保持人物身份和外貌一致。";
+  const numberedIntents = plan.intents.map((intent, index) => `${index + 1}. ${intent}`).join("\n");
+  const fullPrompt = `${MEME_PACK_SYSTEM_PROMPT}\n\n${subjectInstruction}\n本次套装规格：严格 ${layout.columns} 列 × ${layout.rows} 行，共 ${layout.count} 个格子。\n套装主题：${plan.theme.label}（${plan.theme.description}）。${scenario ? `\n用户给出的对话或场景：${scenario}\n所有格子都要围绕这个场景形成不同而自然的回应。` : ""}\n各格意图顺序：\n${numberedIntents}\n视觉风格：${style}${preference ? `\n\n用户补充偏好：${preference}` : ""}`;
   const endpoint = buildImageEndpoint(provider.baseUrl, "edits");
+  const referenceImages = secondReferenceImage
+    ? [referenceImage, secondReferenceImage]
+    : referenceImage;
 
   try {
     let response = await callImageProvider(
@@ -161,12 +184,12 @@ export async function handleGenerateMemePack(request: Request, env: MemeImageEnv
       provider,
       imageModelName,
       fullPrompt,
-      referenceImage,
+      referenceImages,
       false,
       { size: layout.size },
     );
     if (!response.ok && [400, 415, 422].includes(response.status)) {
-      response = await callImageProvider(endpoint, provider, imageModelName, fullPrompt, referenceImage, true);
+      response = await callImageProvider(endpoint, provider, imageModelName, fullPrompt, referenceImages, true);
     }
     if (response.status >= 300 && response.status < 400) {
       return jsonError("生图接口返回了跳转响应，请在 Base URL 中填写最终 HTTPS 地址", 502);
@@ -189,11 +212,14 @@ export async function handleGenerateMemePack(request: Request, env: MemeImageEnv
       imageUrl: image.url,
       model: imageModelName,
       referenceUsed: true,
-      notice: `${layout.label} 人物表情套装生成完成`,
+      subjectMode: secondReferenceImage ? "duo" : "single",
+      effectPlan: plan.effects,
+      reactionPlan: plan.intents,
+      notice: `${layout.label} ${secondReferenceImage ? "双人互动" : plan.theme.label}表情套装生成完成`,
     }), { headers: jsonHeaders });
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
-      return jsonError("生成 12 张表情需要更久一点，请稍后重试", 504);
+      return jsonError(`生成 ${layout.count} 张表情需要更久一点，请稍后重试`, 504);
     }
     const message = error instanceof Error ? error.message : "生图接口连接失败";
     return jsonError(`表情套装生成失败：${message}`, 502);
@@ -235,7 +261,7 @@ async function callImageProvider(
   provider: ProviderConfig,
   model: string,
   prompt: string,
-  image: File | null,
+  image: File | File[] | null,
   minimal: boolean,
   options: { size?: string } = {},
 ) {
@@ -249,7 +275,11 @@ async function callImageProvider(
     const upstream = new FormData();
     upstream.append("model", model);
     upstream.append("prompt", prompt);
-    upstream.append("image", image, image.name || "reference.png");
+    const images = Array.isArray(image) ? image : [image];
+    const fieldName = images.length > 1 ? "image[]" : "image";
+    images.forEach((file, index) => {
+      upstream.append(fieldName, file, file.name || `reference-${index + 1}.png`);
+    });
     if (!minimal) {
       upstream.append("size", options.size || "1024x1024");
       upstream.append("quality", "medium");

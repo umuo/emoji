@@ -41,10 +41,11 @@ test("server-renders the meme creator", async () => {
 });
 
 test("keeps the image-generation model and privacy disclosure in the product UI", async () => {
-  const [page, imageHandler, packConfig, worker] = await Promise.all([
+  const [page, imageHandler, packConfig, themeConfig, worker] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../lib/meme-image-ai.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/meme-pack-layouts.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/meme-pack-themes.ts", import.meta.url), "utf8"),
     readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
   ]);
 
@@ -69,6 +70,18 @@ test("keeps the image-generation model and privacy disclosure in the product UI"
   assert.match(packConfig, /4×4/);
   assert.match(page, /selectedPackLayout\.count/);
   assert.match(page, /每格文字由 gpt-image-2 随表情创作/);
+  assert.match(page, /添加搭档（双人互动）/);
+  assert.match(page, /套装主题/);
+  assert.match(page, /输入一句对话或场景/);
+  assert.match(page, /AI 已智能匹配，可单独调整/);
+  assert.match(page, /updatePackEffect/);
+  assert.match(page, /form\.append\("image2"/);
+  assert.match(themeConfig, /日常万能/);
+  assert.match(themeConfig, /打工人/);
+  assert.match(themeConfig, /情侣互动/);
+  assert.match(themeConfig, /朋友斗图/);
+  assert.match(themeConfig, /游戏开黑/);
+  assert.match(themeConfig, /场景对话/);
   assert.match(page, /fetch\("\/api\/generate-pack"/);
   assert.match(page, /发疯抖动/);
   assert.match(page, /高清 GIF/);

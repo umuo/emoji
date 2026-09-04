@@ -36,6 +36,11 @@ import {
   type MemePackLayout,
   type MemePackLayoutId,
 } from "../lib/meme-pack";
+import {
+  MEME_PACK_THEMES,
+  type MemePackEffect,
+  type MemePackThemeId,
+} from "../lib/meme-pack-themes";
 
 type EditorMode = "imagegen" | "pack" | "meme" | "gif";
 type LayoutId = "poster" | "dialogue" | "sticker" | "editorial";
@@ -69,6 +74,9 @@ type ImageGenerationResponse = {
   model?: string;
   referenceUsed?: boolean;
   notice?: string;
+  subjectMode?: "single" | "duo";
+  effectPlan?: MemePackEffect[];
+  reactionPlan?: string[];
   error?: string;
 };
 
@@ -77,6 +85,14 @@ type MemePackSlice = {
   blob: Blob;
   url: string;
 };
+
+const PACK_EFFECT_OPTIONS: Array<{ id: MemePackEffect; label: string; icon: string }> = [
+  { id: "still", label: "静止", icon: "■" },
+  { id: "shake", label: "抖动", icon: "≋" },
+  { id: "bounce", label: "弹跳", icon: "↕" },
+  { id: "zoom", label: "缩放", icon: "⊕" },
+  { id: "flash", label: "闪烁", icon: "✦" },
+];
 
 type ProviderSettings = {
   baseUrl: string;
@@ -285,18 +301,26 @@ export default function Home() {
 
   const [packPhotoFile, setPackPhotoFile] = useState<File | null>(null);
   const [packPhotoUrl, setPackPhotoUrl] = useState("");
+  const [packSecondPhotoFile, setPackSecondPhotoFile] = useState<File | null>(null);
+  const [packSecondPhotoUrl, setPackSecondPhotoUrl] = useState("");
   const [packLayoutId, setPackLayoutId] = useState<MemePackLayoutId>("3x4");
+  const [packThemeId, setPackThemeId] = useState<MemePackThemeId>("daily");
+  const [packScenario, setPackScenario] = useState("");
   const [packStyle, setPackStyle] = useState("sticker");
   const [packPreference, setPackPreference] = useState("");
   const [packImageUrl, setPackImageUrl] = useState("");
   const [packModel, setPackModel] = useState("");
   const [packNotice, setPackNotice] = useState("");
   const [packSlices, setPackSlices] = useState<MemePackSlice[]>([]);
+  const [packEffects, setPackEffects] = useState<MemePackEffect[]>([]);
+  const [packReactionPlan, setPackReactionPlan] = useState<string[]>([]);
+  const [selectedPackSliceIndex, setSelectedPackSliceIndex] = useState(0);
   const [packGenerating, setPackGenerating] = useState(false);
   const [packDownloading, setPackDownloading] = useState<"png" | "gif" | "gif-static" | "">("");
   const [packDownloadProgress, setPackDownloadProgress] = useState(0);
   const [packError, setPackError] = useState("");
   const packPhotoObjectUrlRef = useRef("");
+  const packSecondPhotoObjectUrlRef = useRef("");
   const packSliceObjectUrlsRef = useRef<string[]>([]);
 
   const [gifSourceKind, setGifSourceKind] = useState<GifSourceKind>("video");
@@ -676,6 +700,7 @@ export default function Home() {
     if (gifObjectUrlRef.current) URL.revokeObjectURL(gifObjectUrlRef.current);
     if (referenceObjectUrlRef.current) URL.revokeObjectURL(referenceObjectUrlRef.current);
     if (packPhotoObjectUrlRef.current) URL.revokeObjectURL(packPhotoObjectUrlRef.current);
+    if (packSecondPhotoObjectUrlRef.current) URL.revokeObjectURL(packSecondPhotoObjectUrlRef.current);
     packSliceObjectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
   }, []);
 
@@ -937,6 +962,9 @@ export default function Home() {
     packSliceObjectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
     packSliceObjectUrlsRef.current = [];
     setPackSlices([]);
+    setPackEffects([]);
+    setPackReactionPlan([]);
+    setSelectedPackSliceIndex(0);
     setPackDownloading("");
     setPackDownloadProgress(0);
   };
@@ -978,6 +1006,43 @@ export default function Home() {
     setPackError("");
   };
 
+  const loadPackSecondPhoto = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setPackError("搭档照片仅支持 JPG、PNG 或 WEBP");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setPackError("搭档照片请控制在 10 MB 以内");
+      return;
+    }
+
+    if (packSecondPhotoObjectUrlRef.current) URL.revokeObjectURL(packSecondPhotoObjectUrlRef.current);
+    clearPackSlices();
+    const nextPhotoUrl = URL.createObjectURL(file);
+    packSecondPhotoObjectUrlRef.current = nextPhotoUrl;
+    setPackSecondPhotoFile(file);
+    setPackSecondPhotoUrl(nextPhotoUrl);
+    setPackImageUrl("");
+    setPackModel("");
+    setPackNotice("");
+    setPackError("");
+  };
+
+  const removePackSecondPhoto = () => {
+    if (packSecondPhotoObjectUrlRef.current) URL.revokeObjectURL(packSecondPhotoObjectUrlRef.current);
+    packSecondPhotoObjectUrlRef.current = "";
+    clearPackSlices();
+    setPackSecondPhotoFile(null);
+    setPackSecondPhotoUrl("");
+    setPackImageUrl("");
+    setPackModel("");
+    setPackNotice("");
+    setPackError("");
+  };
+
   const selectPackLayout = (layoutId: MemePackLayoutId) => {
     if (layoutId === packLayoutId) return;
     clearPackSlices();
@@ -988,7 +1053,26 @@ export default function Home() {
     setPackError("");
   };
 
-  const sliceMemePack = async (imageUrl: string, layout: MemePackLayout) => {
+  const selectPackTheme = (themeId: MemePackThemeId) => {
+    if (themeId === packThemeId) return;
+    clearPackSlices();
+    setPackThemeId(themeId);
+    setPackImageUrl("");
+    setPackModel("");
+    setPackNotice("");
+    setPackError("");
+  };
+
+  const updatePackEffect = (index: number, effect: MemePackEffect) => {
+    setPackEffects((current) => current.map((value, effectIndex) => effectIndex === index ? effect : value));
+  };
+
+  const sliceMemePack = async (
+    imageUrl: string,
+    layout: MemePackLayout,
+    effectPlan: MemePackEffect[] = [],
+    reactionPlan: string[] = [],
+  ) => {
     const source = await loadCanvasImage(imageUrl);
     if (!source.naturalWidth || !source.naturalHeight) {
       throw new Error("表情套装图片尚未加载完成，请稍后再试");
@@ -1032,6 +1116,13 @@ export default function Home() {
       clearPackSlices();
       packSliceObjectUrlsRef.current = createdUrls;
       setPackSlices(nextSlices.sort((a, b) => a.cell.index - b.cell.index));
+      const allowedEffects = new Set(PACK_EFFECT_OPTIONS.map((effect) => effect.id));
+      setPackEffects(Array.from({ length: layout.count }, (_, index) => {
+        const planned = effectPlan[index];
+        return planned && allowedEffects.has(planned) ? planned : (["bounce", "shake", "zoom", "flash"] as MemePackEffect[])[index % 4];
+      }));
+      setPackReactionPlan(Array.from({ length: layout.count }, (_, index) => reactionPlan[index] || `表情 ${index + 1}`));
+      setSelectedPackSliceIndex(0);
     } catch (error) {
       createdUrls.forEach((url) => URL.revokeObjectURL(url));
       throw error;
@@ -1040,6 +1131,10 @@ export default function Home() {
 
   const generateMemePack = async () => {
     if (!packPhotoFile || packGenerating) return;
+    if (packThemeId === "scenario" && packScenario.trim().length < 2) {
+      setPackError("请先输入一句对话或场景");
+      return;
+    }
     const requestedLayout = selectedPackLayout;
     setPackGenerating(true);
     setPackError("");
@@ -1051,8 +1146,11 @@ export default function Home() {
     try {
       const form = new FormData();
       form.append("image", packPhotoFile, packPhotoFile.name);
+      if (packSecondPhotoFile) form.append("image2", packSecondPhotoFile, packSecondPhotoFile.name);
       form.append("style", packStyle);
       form.append("layout", requestedLayout.id);
+      form.append("theme", packThemeId);
+      if (packScenario.trim()) form.append("scenario", packScenario.trim());
       if (packPreference.trim()) form.append("prompt", packPreference.trim());
       if (useCustomProvider) form.append("provider", JSON.stringify(providerSettings));
 
@@ -1065,7 +1163,7 @@ export default function Home() {
       setPackImageUrl(data.imageUrl);
       setPackModel(data.model || "");
       setPackNotice(data.notice || `${requestedLayout.count} 张人物表情生成完成`);
-      await sliceMemePack(data.imageUrl, requestedLayout);
+      await sliceMemePack(data.imageUrl, requestedLayout, data.effectPlan, data.reactionPlan);
     } catch (error) {
       const isSecurityError = error instanceof DOMException && error.name === "SecurityError";
       setPackError(isSecurityError
@@ -1085,9 +1183,9 @@ export default function Home() {
     const context = canvas.getContext("2d", { willReadFrequently: true });
     if (!context) throw new Error("浏览器无法创建 GIF 画布");
 
-    const effects: StillGifEffect[] = ["bounce", "shake", "zoom", "flash"];
-    const animation = createStillGifFrames(effects[index % effects.length], "fast");
-    const encoder = await createGifFrameEncoder(width, height, 64, 0);
+    const effect = packEffects[index] || (["bounce", "shake", "zoom", "flash"] as StillGifEffect[])[index % 4];
+    const animation = createStillGifFrames(effect, "fast");
+    const encoder = await createGifFrameEncoder(width, height, 64, effect === "still" ? -1 : 0);
     animation.frames.forEach((frame) => {
       context.clearRect(0, 0, width, height);
       context.save();
@@ -1685,7 +1783,7 @@ export default function Home() {
             <section className="control-panel pack-controls" aria-label="人物表情套装设置">
               <div className="section-heading">
                 <span>1</span>
-                <div><h2>上传一张人物照片</h2><p>正脸清楚、光线自然，角色还原更稳定</p></div>
+                <div><h2>上传人物照片</h2><p>主角必选，也可以再加一位搭档做双人互动</p></div>
               </div>
 
               {packPhotoUrl && packPhotoFile ? (
@@ -1701,6 +1799,22 @@ export default function Home() {
                   <span aria-hidden="true">☺</span>
                   <b>选择人物照片</b>
                   <small>JPG / PNG / WEBP · 最大 10 MB</small>
+                </label>
+              )}
+
+              {packSecondPhotoUrl && packSecondPhotoFile ? (
+                <div className="reference-preview pack-photo-preview pack-partner-preview">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={packSecondPhotoUrl} alt="搭档照片预览" />
+                  <span><b>搭档 · {packSecondPhotoFile.name}</b><small>{fileSizeLabel(packSecondPhotoFile.size)} · 将与主角一起发送</small></span>
+                  <button type="button" onClick={removePackSecondPhoto} disabled={packGenerating} aria-label="移除搭档照片">×</button>
+                </div>
+              ) : (
+                <label className="reference-upload pack-partner-upload">
+                  <input type="file" accept="image/jpeg,image/png,image/webp" onChange={loadPackSecondPhoto} disabled={packGenerating} />
+                  <span aria-hidden="true">＋</span>
+                  <b>添加搭档（双人互动）</b>
+                  <small>可选 · 上传后每格让两人一起演</small>
                 </label>
               )}
 
@@ -1723,6 +1837,38 @@ export default function Home() {
                     <small>{layout.count} 张</small>
                   </button>
                 ))}
+              </div>
+
+              <p className="mini-label pack-theme-label">套装主题 · AI 会按主题设计整组反应</p>
+              <div className="pack-theme-grid" aria-label="选择人物表情套装主题">
+                {MEME_PACK_THEMES.map((theme) => (
+                  <button
+                    type="button"
+                    key={theme.id}
+                    className={packThemeId === theme.id ? "selected" : ""}
+                    onClick={() => selectPackTheme(theme.id)}
+                    disabled={packGenerating}
+                    aria-pressed={packThemeId === theme.id}
+                  >
+                    <b>{theme.label}</b>
+                    <small>{theme.description}</small>
+                  </button>
+                ))}
+              </div>
+
+              <label className="field-label" htmlFor="pack-scenario">
+                {packThemeId === "scenario" ? "输入一句对话或场景（必填）" : "对话或场景（可选）"}
+              </label>
+              <div className="image-prompt-field pack-scenario-field">
+                <textarea
+                  id="pack-scenario"
+                  value={packScenario}
+                  onChange={(event) => setPackScenario(event.target.value)}
+                  maxLength={300}
+                  disabled={packGenerating}
+                  placeholder="比如：老板突然说今晚加班。AI 会围绕它生成一整套不同回应。"
+                />
+                <span>{packScenario.length}/300</span>
               </div>
 
               <p className="mini-label pack-style-label">选择画风 · 表情、动作和配字由 AI 自动创作</p>
@@ -1752,9 +1898,18 @@ export default function Home() {
                 <span>{packPreference.length}/300</span>
               </div>
 
-              <button className="button image-generate-button pack-generate-button" type="button" onClick={generateMemePack} disabled={!packPhotoFile || packGenerating}>
+              <button
+                className="button image-generate-button pack-generate-button"
+                type="button"
+                onClick={generateMemePack}
+                disabled={!packPhotoFile || packGenerating || (packThemeId === "scenario" && packScenario.trim().length < 2)}
+              >
                 <span className="sparkle" aria-hidden="true">✦</span>
-                {packGenerating ? `正在创作 ${selectedPackLayout.count} 张表情，可能需要 1–2 分钟…` : `生成 ${selectedPackLayout.count} 张人物表情`}
+                {packGenerating
+                  ? `正在创作 ${selectedPackLayout.count} 张表情，可能需要 1–2 分钟…`
+                  : packSecondPhotoFile
+                    ? `生成 ${selectedPackLayout.count} 张双人互动表情`
+                    : `生成 ${selectedPackLayout.count} 张${MEME_PACK_THEMES.find((theme) => theme.id === packThemeId)?.label || "人物"}表情`}
                 <span aria-hidden="true">→</span>
               </button>
               <button className="provider-shortcut" type="button" onClick={openSettings}>
@@ -1762,7 +1917,7 @@ export default function Home() {
                 <span>切换 →</span>
               </button>
               {packError && <p className="error-message">{packError}</p>}
-              <p className="reference-disclosure">人物照片只在生成时发送给当前 AI 服务。每格文字由 gpt-image-2 随表情创作；浏览器只按所选网格切图并在本地打包。</p>
+              <p className="reference-disclosure">一张或两张人物照片只在生成时发送给当前 AI 服务。每格文字由 gpt-image-2 随表情创作；浏览器只按所选网格切图、制作动效并在本地打包。</p>
             </section>
 
             <section className="preview-panel pack-preview" aria-label="人物表情套装预览">
@@ -1778,11 +1933,19 @@ export default function Home() {
               >
                 {packSlices.length === selectedPackLayout.count ? (
                   packSlices.map((slice) => (
-                    <figure className="pack-tile" key={slice.cell.index}>
+                    <button
+                      type="button"
+                      className={`pack-tile ${selectedPackSliceIndex === slice.cell.index ? `selected preview-${packEffects[slice.cell.index] || "still"}` : ""}`}
+                      key={slice.cell.index}
+                      onClick={() => setSelectedPackSliceIndex(slice.cell.index)}
+                      aria-label={`选择第 ${slice.cell.index + 1} 张并调整动效`}
+                      aria-pressed={selectedPackSliceIndex === slice.cell.index}
+                    >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={slice.url} alt={`人物表情 ${slice.cell.index + 1}`} />
                       <span>{String(slice.cell.index + 1).padStart(2, "0")}</span>
-                    </figure>
+                      <small className="pack-effect-badge">{PACK_EFFECT_OPTIONS.find((effect) => effect.id === packEffects[slice.cell.index])?.label || "静止"}</small>
+                    </button>
                   ))
                 ) : packImageUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -1806,6 +1969,26 @@ export default function Home() {
 
               {packSlices.length === selectedPackLayout.count ? (
                 <>
+                  <div className="pack-effect-editor">
+                    <div className="pack-effect-editor-header">
+                      <span><b>第 {String(selectedPackSliceIndex + 1).padStart(2, "0")} 张</b> · {packReactionPlan[selectedPackSliceIndex] || "聊天反应"}</span>
+                      <small>AI 已智能匹配，可单独调整</small>
+                    </div>
+                    <div className="pack-effect-options" aria-label={`调整第 ${selectedPackSliceIndex + 1} 张的 GIF 动效`}>
+                      {PACK_EFFECT_OPTIONS.map((effect) => (
+                        <button
+                          type="button"
+                          key={effect.id}
+                          className={packEffects[selectedPackSliceIndex] === effect.id ? "selected" : ""}
+                          onClick={() => updatePackEffect(selectedPackSliceIndex, effect.id)}
+                          aria-pressed={packEffects[selectedPackSliceIndex] === effect.id}
+                        >
+                          <span aria-hidden="true">{effect.icon}</span>
+                          <b>{effect.label}</b>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <div className="image-result-meta pack-result-meta"><span>{packNotice || "切图完成 ✓"}</span><b>{packModel || "gpt-image-2"}</b></div>
                   <div className="pack-actions">
                     <button className="button primary" type="button" onClick={() => downloadMemePackArchive("png")} disabled={Boolean(packDownloading)}>
@@ -1818,7 +2001,7 @@ export default function Home() {
                       {packDownloading === "gif-static" ? `正在制作静态 GIF ${packDownloadProgress}%` : "下载静态 GIF 压缩包（无动画）"} <span>↓</span>
                     </button>
                   </div>
-                  <p className="pack-download-note">每个压缩包包含 {selectedPackLayout.count} 张独立文件；动态版保留轻量循环动效，静态版每张只有一帧、完全不动。</p>
+                  <p className="pack-download-note">每个压缩包包含 {selectedPackLayout.count} 张独立文件；动态版使用上方逐张设置的动效，静态版每张只有一帧、完全不动。</p>
                   <div className="image-result-links pack-result-links">
                     <a className="text-button" href={packImageUrl} download="梗一下-人物表情套装原图.png">下载 AI 原始整图</a>
                     <button className="text-button" type="button" onClick={generateMemePack} disabled={packGenerating || Boolean(packDownloading)}>再生成一套</button>

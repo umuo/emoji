@@ -124,15 +124,83 @@ test("generates a 3 by 4 person expression sheet with model-authored captions", 
       method: "POST",
       body: form,
     }), {});
-    const payload = await response.json() as { imageUrl: string; referenceUsed: boolean };
+    const payload = await response.json() as {
+      imageUrl: string;
+      referenceUsed: boolean;
+      effectPlan: string[];
+      reactionPlan: string[];
+      subjectMode: string;
+    };
 
     assert.equal(response.status, 200);
     assert.equal(upstreamUrl, "https://images.example.com/v1/images/edits");
     assert.equal(payload.imageUrl, "data:image/png;base64,AAAA");
     assert.equal(payload.referenceUsed, true);
+    assert.equal(payload.subjectMode, "single");
+    assert.equal(payload.effectPlan.length, 12);
+    assert.equal(payload.reactionPlan.length, 12);
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("sends two reference images and builds a themed interaction pack", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_input, init) => {
+    assert.ok(init?.body instanceof FormData);
+    const upstream = init.body as FormData;
+    assert.equal(upstream.get("image"), null);
+    assert.equal(upstream.getAll("image[]").length, 2);
+    assert.match(String(upstream.get("prompt")), /主体模式：双人互动/);
+    assert.match(String(upstream.get("prompt")), /套装主题：情侣互动/);
+    assert.match(String(upstream.get("prompt")), /下班后去吃火锅吗/);
+    assert.match(String(upstream.get("prompt")), /不能把两张脸融合成一个人/);
+    return new Response(JSON.stringify({ data: [{ b64_json: "AAAA" }] }));
+  };
+
+  try {
+    const form = new FormData();
+    form.append("image", new File(["person-one"], "one.png", { type: "image/png" }));
+    form.append("image2", new File(["person-two"], "two.jpg", { type: "image/jpeg" }));
+    form.append("layout", "2x2");
+    form.append("theme", "couple");
+    form.append("scenario", "下班后去吃火锅吗");
+    form.append("provider", JSON.stringify(provider));
+    const response = await handleGenerateMemePack(new Request("https://site.example/api/generate-pack", {
+      method: "POST",
+      body: form,
+    }), {});
+    const payload = await response.json() as {
+      subjectMode: string;
+      effectPlan: string[];
+      reactionPlan: string[];
+      notice: string;
+    };
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.subjectMode, "duo");
+    assert.equal(payload.effectPlan.length, 4);
+    assert.equal(payload.reactionPlan.length, 4);
+    assert.match(payload.notice, /双人互动/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("requires a sentence when the conversational scenario theme is selected", async () => {
+  const form = new FormData();
+  form.append("image", new File(["person"], "person.png", { type: "image/png" }));
+  form.append("theme", "scenario");
+  form.append("provider", JSON.stringify(provider));
+
+  const response = await handleGenerateMemePack(new Request("https://site.example/api/generate-pack", {
+    method: "POST",
+    body: form,
+  }), {});
+  const payload = await response.json() as { error: string };
+
+  assert.equal(response.status, 400);
+  assert.match(payload.error, /输入一句对话或场景/);
 });
 
 test("uses a square canvas and 16 reactions for the 4x4 pack", async () => {
