@@ -1089,6 +1089,7 @@ export default function Home() {
     layout: MemePackLayout,
     effectPlan: MemePackEffect[] = [],
     reactionPlan: string[] = [],
+    subjectMode: "single" | "duo" = "single",
   ) => {
     const source = await loadCanvasImage(imageUrl);
     if (!source.naturalWidth || !source.naturalHeight) {
@@ -1111,6 +1112,7 @@ export default function Home() {
         source.naturalHeight,
         layout.columns,
         layout.rows,
+        subjectMode,
       );
       const nextSlices = await Promise.all(detectedCells.map(async (cell) => {
         const canvas = document.createElement("canvas");
@@ -1191,7 +1193,7 @@ export default function Home() {
       setPackImageUrl(data.imageUrl);
       setPackModel(data.model || "");
       setPackNotice(data.notice || `${requestedLayout.count} 张人物表情生成完成`);
-      await sliceMemePack(data.imageUrl, requestedLayout, data.effectPlan, data.reactionPlan);
+      await sliceMemePack(data.imageUrl, requestedLayout, data.effectPlan, data.reactionPlan, data.subjectMode || (packSecondPhotoFile ? "duo" : "single"));
     } catch (error) {
       const isSecurityError = error instanceof DOMException && error.name === "SecurityError";
       setPackError(isSecurityError

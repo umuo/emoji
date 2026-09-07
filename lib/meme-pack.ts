@@ -95,12 +95,42 @@ function analyzeGridBoundary(
   };
 }
 
+// Duo captions often hide part of a boundary. Require a background-color
+// transition in every panel, excluding black text and white sticker outlines.
+function duoBackgroundBoundaryScore(
+  pixels: Uint8ClampedArray, width: number, height: number,
+  position: number, axis: "x" | "y", crossSegments: number,
+) {
+  const crossLength = axis === "x" ? height : width;
+  let total = 0;
+  for (let segment = 0; segment < crossSegments; segment += 1) {
+    const start = Math.ceil(crossLength * segment / crossSegments);
+    const end = Math.floor(crossLength * (segment + 1) / crossSegments);
+    let matches = 0;
+    for (let cross = start; cross < end; cross += 1) {
+      const offset = (axis === "y" ? position * width + cross : cross * width + position) * 4;
+      const previous = offset - (axis === "y" ? width : 1) * 4;
+      const a = [pixels[offset], pixels[offset + 1], pixels[offset + 2]];
+      const b = [pixels[previous], pixels[previous + 1], pixels[previous + 2]];
+      const background = (rgb: number[]) => Math.min(...rgb) > 65
+        && Math.max(...rgb) > 145 && Math.max(...rgb) - Math.min(...rgb) > 25;
+      if (background(a) && background(b)
+        && a.reduce((sum, value, i) => sum + Math.abs(value - b[i]), 0) / 3 >= 18) matches += 1;
+    }
+    const coverage = matches / Math.max(1, end - start);
+    if (coverage < 0.3) return 0;
+    total += coverage;
+  }
+  return total / crossSegments;
+}
+
 function detectAxisBoundaries(
   pixels: Uint8ClampedArray,
   width: number,
   height: number,
   segments: number,
   axis: "x" | "y",
+  duoCrossSegments = 0,
 ) {
   const length = axis === "x" ? width : height;
   const nominalSize = length / segments;
@@ -126,6 +156,16 @@ function detectAxisBoundaries(
       }
     }
     boundaries.push(bestPosition);
+    if (duoCrossSegments) {
+      let backgroundScore = duoBackgroundBoundaryScore(pixels, width, height, bestPosition, axis, duoCrossSegments);
+      for (let position = start; position <= end; position += 1) {
+        const score = duoBackgroundBoundaryScore(pixels, width, height, position, axis, duoCrossSegments);
+        if (score > backgroundScore + 0.05) {
+          backgroundScore = score;
+          boundaries[boundaries.length - 1] = position;
+        }
+      }
+    }
   }
 
   boundaries.push(length);
@@ -138,13 +178,14 @@ export function detectMemePackCells(
   height: number,
   columns = MEME_PACK_COLUMNS,
   rows = MEME_PACK_ROWS,
+  subjectMode: "single" | "duo" = "single",
 ): MemePackCell[] {
   if (pixels.length !== width * height * 4) {
     throw new Error("表情包大图像素数据无效");
   }
   const fallbackCells = getMemePackCells(width, height, columns, rows);
-  const xBoundaries = detectAxisBoundaries(pixels, width, height, columns, "x");
-  const yBoundaries = detectAxisBoundaries(pixels, width, height, rows, "y");
+  const xBoundaries = detectAxisBoundaries(pixels, width, height, columns, "x", subjectMode === "duo" ? rows : 0);
+  const yBoundaries = detectAxisBoundaries(pixels, width, height, rows, "y", subjectMode === "duo" ? columns : 0);
 
   return fallbackCells.map((fallback) => {
     const left = xBoundaries[fallback.column];

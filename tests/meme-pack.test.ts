@@ -86,6 +86,39 @@ test("uses the requested AI canvas ratio instead of forcing every preview tile s
   assert.equal(getMemePackCanvasAspectRatio(getMemePackLayout("4x4")), 1);
 });
 
+test("duo slicing finds background boundaries partially hidden by captions without changing single mode", () => {
+  const width = 120;
+  const height = 160;
+  const pixels = new Uint8ClampedArray(width * height * 4);
+  const colors = [[250, 210, 100], [180, 150, 240], [120, 210, 220], [250, 150, 180]];
+  for (let y = 0; y < height; y += 1) {
+    const row = y < 44 ? 0 : y < 82 ? 1 : y < 122 ? 2 : 3;
+    for (let x = 0; x < width; x += 1) {
+      // Aligned dark caption/person strokes conceal 40% of each panel edge.
+      const rgb = x % 40 >= 12 && x % 40 < 28 ? [20, 20, 20] : colors[row];
+      pixels.set([...rgb, 255], (y * width + x) * 4);
+    }
+  }
+  const original = detectMemePackCells(pixels, width, height, 3, 4);
+  assert.deepEqual(detectMemePackCells(pixels, width, height, 3, 4, "single"), original);
+  assert.equal(original[3].y, 40);
+  const duo = detectMemePackCells(pixels, width, height, 3, 4, "duo");
+  assert.equal(duo[0].height, 44);
+  assert.equal(duo[3].y, 44);
+  assert.equal(duo[6].y, 82);
+  assert.equal(duo[9].y, 122);
+});
+
+test("duo background detection ignores a caption edge present in only one panel", () => {
+  const pixels = new Uint8ClampedArray(120 * 160 * 4);
+  for (let y = 0; y < 160; y += 1) {
+    for (let x = 0; x < 120; x += 1) {
+      pixels.set(y === 44 && x < 40 ? [180, 150, 240, 255] : [250, 210, 100, 255], (y * 120 + x) * 4);
+    }
+  }
+  assert.equal(detectMemePackCells(pixels, 120, 160, 3, 4, "duo")[3].y, 40);
+});
+
 test("adapts the preview to the dimensions the image provider actually returned", () => {
   assert.equal(getMemePackSourceAspectRatio(1024, 1024), 1);
   assert.equal(getMemePackSourceAspectRatio(1024, 1536), 2 / 3);
