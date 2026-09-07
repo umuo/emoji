@@ -80,14 +80,21 @@ export async function handleGenerateMemeImage(request: Request, env: MemeImageEn
   if ("error" in providerResult) return jsonError(providerResult.error || "自定义接口设置不完整", 400);
   const provider = providerResult.value;
   const imageModelName = provider.imageModelName || env.OPENAI_IMAGE_MODEL || "gpt-image-2";
-  const fullPrompt = `${MEME_IMAGE_SYSTEM_PROMPT}\n\n视觉风格：${style}\n\n用户需求：${prompt}`;
+  const layoutId = form.get("layout") || "single";
+  if (!["single", "3x4", "4x4"].includes(String(layoutId))) return jsonError("请选择单张、3×4 或 4×4", 400);
+  const sheetLayout = layoutId === "single" ? null : getMemePackLayout(String(layoutId));
+  const sheetPrompt = sheetLayout ? `你是一名中文社交表情包套装设计师。根据用户需求创作一张完整套图，严格 ${sheetLayout.columns} 列 × ${sheetLayout.rows} 行，共 ${sheetLayout.count} 格。只输出 1 张整图，不要分别输出多张图片。
+每格尺寸相同，按画布宽高等分，网格笔直对齐，无外边距、分隔条或圆角。保持角色身份和画风一致，每格展示不同的常用聊天情绪、动作和笑点。若有参考图，保留主体的可识别特征；没有参考图则根据描述原创角色。
+每格自行配置贴合动作的 2–6 字中文短句，用户明确给出的文案应优先使用。人物、道具和完整文字必须位于各格内部，四周至少留出 8% 背景安全区，禁止文字或人物跨格。不要水印、编号或总标题。` : MEME_IMAGE_SYSTEM_PROMPT;
+  const fullPrompt = `${sheetPrompt}\n\n视觉风格：${style}\n\n用户需求：${prompt}`;
+  const options = sheetLayout ? { size: sheetLayout.size, quality: "low" as const, timeoutMs: MEME_PACK_REQUEST_TIMEOUT_MS } : {};
   const action = referenceImage ? "edits" : "generations";
   const endpoint = buildImageEndpoint(provider.baseUrl, action);
 
   try {
-    let response = await callImageProvider(endpoint, provider, imageModelName, fullPrompt, referenceImage, false);
+    let response = await callImageProvider(endpoint, provider, imageModelName, fullPrompt, referenceImage, false, options);
     if (!response.ok && [400, 415, 422].includes(response.status)) {
-      response = await callImageProvider(endpoint, provider, imageModelName, fullPrompt, referenceImage, true);
+      response = await callImageProvider(endpoint, provider, imageModelName, fullPrompt, referenceImage, true, options);
     }
     if (response.status >= 300 && response.status < 400) {
       return jsonError("生图接口返回了跳转响应，请在 Base URL 中填写最终 HTTPS 地址", 502);
@@ -110,7 +117,8 @@ export async function handleGenerateMemeImage(request: Request, env: MemeImageEn
       imageUrl: image.url,
       model: imageModelName,
       referenceUsed: Boolean(referenceImage),
-      notice: referenceImage ? "已参考上传图片生成新的表情包" : "已根据提示词生成表情包",
+      layout: layoutId,
+      notice: sheetLayout ? `${sheetLayout.label} 套图生成完成，共 ${sheetLayout.count} 格` : referenceImage ? "已参考上传图片生成新的表情包" : "已根据提示词生成表情包",
     }), { headers: jsonHeaders });
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {

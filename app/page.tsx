@@ -288,6 +288,9 @@ export default function Home() {
 
   const [imagePrompt, setImagePrompt] = useState("一只加班到灵魂出窍的橘猫，配字“我没事，我还能加班”");
   const [imageStyle, setImageStyle] = useState("internet");
+  const [imageLayout, setImageLayout] = useState<"single" | "3x4" | "4x4">("single");
+  const [generatedLayout, setGeneratedLayout] = useState<"single" | "3x4" | "4x4">("single");
+  const [imageArchiveBusy, setImageArchiveBusy] = useState(false);
   const [referenceFile, setReferenceFile] = useState<File | null>(null);
   const [referenceUrl, setReferenceUrl] = useState("");
   const referenceObjectUrlRef = useRef("");
@@ -884,6 +887,7 @@ export default function Home() {
       const form = new FormData();
       form.append("prompt", prompt);
       form.append("style", imageStyle);
+      form.append("layout", imageLayout);
       if (referenceFile) form.append("image", referenceFile, referenceFile.name);
       if (useCustomProvider) form.append("provider", JSON.stringify(providerSettings));
 
@@ -893,12 +897,56 @@ export default function Home() {
         throw new Error(data.error || "这次没有生成图片，请再试一次");
       }
       setGeneratedImageUrl(data.imageUrl);
+      setGeneratedLayout(imageLayout);
       setGeneratedImageModel(data.model || "");
       setImageGenNotice(data.notice || "表情包生成完成");
     } catch (error) {
       setImageGenError(error instanceof Error ? error.message : "生图失败，请稍后再试");
     } finally {
       setImageGenerating(false);
+    }
+  };
+
+  const downloadImageSheetArchive = async (format: "png" | "gif") => {
+    if (!generatedImageUrl || generatedLayout === "single" || imageArchiveBusy) return;
+    setImageArchiveBusy(true);
+    setImageGifError("");
+    try {
+      const layout = getMemePackLayout(generatedLayout);
+      const source = await loadCanvasImage(generatedImageUrl);
+      const analysis = document.createElement("canvas");
+      analysis.width = source.naturalWidth;
+      analysis.height = source.naturalHeight;
+      const context = analysis.getContext("2d", { willReadFrequently: true });
+      if (!context) throw new Error("无法创建切图画布");
+      context.drawImage(source, 0, 0);
+      const cells = detectMemePackCells(context.getImageData(0, 0, analysis.width, analysis.height).data,
+        analysis.width, analysis.height, layout.columns, layout.rows);
+      const files: Array<{ name: string; data: Blob | Uint8Array }> = [];
+      for (const cell of cells) {
+        const canvas = document.createElement("canvas");
+        const size = format === "gif" ? fitGifDimensions(cell.width, cell.height, 360) : cell;
+        canvas.width = Math.max(1, Math.round(size.width));
+        canvas.height = Math.max(1, Math.round(size.height));
+        const target = canvas.getContext("2d");
+        if (!target) throw new Error("无法创建切图画布");
+        target.drawImage(source, cell.x, cell.y, cell.width, cell.height, 0, 0, canvas.width, canvas.height);
+        const data = format === "gif"
+          ? await encodeStillImageGif(new Uint8Array(target.getImageData(0, 0, canvas.width, canvas.height).data), canvas.width, canvas.height)
+          : await new Promise<Blob>((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("切图失败")), "image/png"));
+        files.push({ name: getMemePackFilename(cell.index, format), data });
+      }
+      const archive = await createMemePackArchive(files, layout.count);
+      const url = URL.createObjectURL(new Blob([archive.slice().buffer], { type: "application/zip" }));
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `梗一下-AI套图-${layout.label}-${format}.zip`;
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      setImageGifError(error instanceof Error ? error.message : "套图打包失败");
+    } finally {
+      setImageArchiveBusy(false);
     }
   };
 
@@ -1661,20 +1709,12 @@ export default function Home() {
             <span>02</span> 人物表情套装 <b>NEW</b>
           </button>
           <button
-            className={mode === "meme" ? "active" : ""}
-            onClick={() => setMode("meme")}
-            role="tab"
-            aria-selected={mode === "meme"}
-          >
-            <span>03</span> 图片表情包
-          </button>
-          <button
             className={mode === "gif" ? "active" : ""}
             onClick={() => setMode("gif")}
             role="tab"
             aria-selected={mode === "gif"}
           >
-            <span>04</span> 图片 / 视频转 GIF
+            <span>03</span> 图片 / 视频转 GIF
           </button>
         </div>
 
@@ -1710,6 +1750,17 @@ export default function Home() {
                 ))}
               </div>
 
+              <p className="mini-label">生成规格</p>
+              <div className="image-style-grid" aria-label="选择生成规格">
+                {(["single", "3x4", "4x4"] as const).map((id) => (
+                  <button type="button" key={id} className={imageLayout === id ? "selected" : ""}
+                    aria-pressed={imageLayout === id} disabled={imageGenerating}
+                    onClick={() => setImageLayout(id)}>
+                    <b>{id === "single" ? "单张图" : id === "3x4" ? "3×4 套图" : "4×4 套图"}</b>
+                    <small>{id === "single" ? "一个画面" : id === "3x4" ? "12 个表情" : "16 个表情"}</small>
+                  </button>
+                ))}
+              </div>
               <p className="mini-label">选一种画风</p>
               <div className="image-style-grid" aria-label="选择生图风格">
                 {[
@@ -1750,7 +1801,7 @@ export default function Home() {
 
               <button className="button image-generate-button" onClick={generateMemeImage} disabled={imageGenerating || imagePrompt.trim().length < 2}>
                 <span className="sparkle" aria-hidden="true">✦</span>
-                {imageGenerating ? "正在把脑洞画出来，可能需要 1–2 分钟…" : referenceFile ? "参考这张图生成表情包" : "生成一张原创表情包"}
+                {imageGenerating ? "正在绘制，可能需要 1–3 分钟…" : imageLayout !== "single" ? `生成 ${imageLayout === "3x4" ? "3×4 · 12" : "4×4 · 16"} 格套图` : referenceFile ? "参考这张图生成表情包" : "生成一张原创表情包"}
                 <span aria-hidden="true">→</span>
               </button>
               <button className="provider-shortcut" type="button" onClick={openSettings}>
@@ -1762,7 +1813,7 @@ export default function Home() {
             </section>
 
             <section className="preview-panel imagegen-preview" aria-label="AI 生图预览">
-              <div className="preview-title"><span>{generatedImageUrl ? "新鲜出炉" : "AI 画布"}</span><small>1:1 · 1024 × 1024</small></div>
+              <div className="preview-title"><span>{generatedImageUrl ? "新鲜出炉" : "AI 画布"}</span><small>{(generatedImageUrl ? generatedLayout : imageLayout) === "single" ? "单张图" : (generatedImageUrl ? generatedLayout : imageLayout) === "3x4" ? "3×4 · 12 格" : "4×4 · 16 格"}</small></div>
               <div className={`imagegen-stage ${generatedImageUrl ? "has-image" : "empty"}`} aria-busy={imageGenerating}>
                 {generatedImageUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -1777,6 +1828,12 @@ export default function Home() {
               {generatedImageUrl ? (
                 <>
                   <div className="image-result-meta"><span>{imageGenNotice || "生成成功 ✓"}</span><b>{generatedImageModel || "AI Image"}</b></div>
+                  {generatedLayout !== "single" && (
+                    <div className="action-row">
+                      <button className="button primary" type="button" disabled={imageArchiveBusy || imageGenerating} onClick={() => downloadImageSheetArchive("png")}>下载分格 PNG 压缩包</button>
+                      <button className="button secondary" type="button" disabled={imageArchiveBusy || imageGenerating} onClick={() => downloadImageSheetArchive("gif")}>{imageArchiveBusy ? "正在打包…" : "下载分格静态 GIF 压缩包"}</button>
+                    </div>
+                  )}
                   <div className="action-row image-result-actions">
                     <a className="button primary" href={generatedImageUrl} download="梗一下-AI表情包.png">下载高清图 <span>↓</span></a>
                     <button className="button secondary" type="button" onClick={copyGeneratedImage} disabled={imageCopyStatus === "复制中…"}>
@@ -1804,7 +1861,7 @@ export default function Home() {
                   </div>
                 </>
               ) : (
-                <p className="local-hint">✦ 系统会自动把需求收敛为适合聊天转发的单张表情包</p>
+                <p className="local-hint">✦ 可生成单张表情或整套聊天反应；套图支持分格下载</p>
               )}
             </section>
           </div>

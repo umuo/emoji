@@ -9,6 +9,38 @@ const provider = {
   imageModelName: "image-model",
 };
 
+test("AI image sheets use one request with the selected grid, with or without a reference", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const layout of ["3x4", "4x4"]) {
+      for (const reference of [false, true]) {
+        let calls = 0;
+        globalThis.fetch = async (input, init) => {
+          calls += 1;
+          assert.match(String(input), reference ? /images\/edits$/ : /images\/generations$/);
+          const body = init?.body instanceof FormData ? Object.fromEntries(init.body) : JSON.parse(String(init?.body));
+          assert.equal(body.size, layout === "3x4" ? "1024x1536" : "1024x1024");
+          assert.match(String(body.prompt), layout === "3x4" ? /严格 3 列 × 4 行，共 12 格/ : /严格 4 列 × 4 行，共 16 格/);
+          assert.match(String(body.prompt), /只输出 1 张整图/);
+          assert.doesNotMatch(String(body.prompt), /输出单张 1:1/);
+          return new Response(JSON.stringify({ data: [{ b64_json: "AAAA" }] }));
+        };
+        const form = new FormData();
+        form.set("prompt", "猫咪的日常聊天表情");
+        form.set("layout", layout);
+        form.set("provider", JSON.stringify(provider));
+        if (reference) form.set("image", new File(["cat"], "cat.png", { type: "image/png" }));
+        const response = await handleGenerateMemeImage(new Request("https://site.example/api/generate-image", { method: "POST", body: form }), {});
+        assert.equal(response.status, 200);
+        assert.equal((await response.json() as { layout: string }).layout, layout);
+        assert.equal(calls, 1);
+      }
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("uses the image generations endpoint and returns base64 output", async () => {
   const originalFetch = globalThis.fetch;
   let upstreamUrl = "";

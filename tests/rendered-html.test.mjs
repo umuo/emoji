@@ -34,7 +34,9 @@ test("server-renders the meme creator", async () => {
   assert.doesNotMatch(html, /AI 心情出图/);
   assert.match(html, /AI 生图/);
   assert.match(html, /人物表情套装/);
-  assert.match(html, /图片表情包/);
+  assert.doesNotMatch(html, /图片表情包/);
+  assert.match(html, /3×4 套图/);
+  assert.match(html, /4×4 套图/);
   assert.match(html, /图片 \/ 视频转 GIF/);
   assert.match(html, /素材流向说清楚/);
   assert.doesNotMatch(html, /Your site is taking shape|Starter Project/);
