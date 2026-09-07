@@ -674,9 +674,14 @@ export default function Home() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
+      try {
+      const savedKey = localStorage.getItem(PROVIDER_STORAGE.apiKey);
+      const apiKey = savedKey ?? sessionStorage.getItem(PROVIDER_STORAGE.apiKey) ?? "";
+      if (savedKey === null && apiKey) localStorage.setItem(PROVIDER_STORAGE.apiKey, apiKey);
+      sessionStorage.removeItem(PROVIDER_STORAGE.apiKey);
       const saved: ProviderSettings = {
         baseUrl: localStorage.getItem(PROVIDER_STORAGE.baseUrl) || DEFAULT_PROVIDER.baseUrl,
-        apiKey: sessionStorage.getItem(PROVIDER_STORAGE.apiKey) || "",
+        apiKey,
         modelName: DEFAULT_PROVIDER.modelName,
         imageModelName: localStorage.getItem(PROVIDER_STORAGE.imageModelName) || DEFAULT_PROVIDER.imageModelName,
       };
@@ -685,6 +690,9 @@ export default function Home() {
       setDraftSettings(saved);
       setUseCustomProvider(enabled);
       setDraftEnabled(enabled);
+      } catch {
+        setSettingsError("浏览器无法读取本地配置，请检查是否允许本站使用本地存储。");
+      }
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
@@ -795,16 +803,22 @@ export default function Home() {
       modelName: DEFAULT_PROVIDER.modelName,
       imageModelName: imageModelName || DEFAULT_PROVIDER.imageModelName,
     };
-    setProviderSettings(nextSettings);
-    setUseCustomProvider(draftEnabled);
+    try {
     localStorage.setItem(PROVIDER_STORAGE.enabled, String(draftEnabled));
     localStorage.setItem(PROVIDER_STORAGE.baseUrl, nextSettings.baseUrl);
     localStorage.setItem(PROVIDER_STORAGE.imageModelName, nextSettings.imageModelName);
     if (nextSettings.apiKey) {
-      sessionStorage.setItem(PROVIDER_STORAGE.apiKey, nextSettings.apiKey);
+      localStorage.setItem(PROVIDER_STORAGE.apiKey, nextSettings.apiKey);
     } else {
-      sessionStorage.removeItem(PROVIDER_STORAGE.apiKey);
+      localStorage.removeItem(PROVIDER_STORAGE.apiKey);
     }
+    sessionStorage.removeItem(PROVIDER_STORAGE.apiKey);
+    } catch {
+      setSettingsError("配置未能保存，请检查浏览器是否允许本站使用本地存储后重试。");
+      return;
+    }
+    setProviderSettings(nextSettings);
+    setUseCustomProvider(draftEnabled);
     setSettingsOpen(false);
   };
 
@@ -2394,7 +2408,7 @@ export default function Home() {
                     {showApiKey ? "隐藏" : "显示"}
                   </button>
                 </div>
-                <small>仅保存在当前浏览器会话；无鉴权的兼容接口可留空</small>
+                <small>保存在当前浏览器，关闭后重新打开仍可使用；无鉴权的兼容接口可留空</small>
               </label>
 
               <label className="settings-field">
@@ -2414,7 +2428,7 @@ export default function Home() {
 
             <div className="settings-security">
               <span aria-hidden="true">⌁</span>
-              <p><b>密钥如何使用？</b><br />生成时经本站临时转发到你填写的接口，不写入源码、日志或数据库。关闭浏览器会话后自动清除。</p>
+              <p><b>密钥如何使用？</b><br />密钥与接口配置保存在当前浏览器的 localStorage，生成时经本站临时转发到你填写的接口。点击“恢复默认”可清除已保存的配置和密钥。</p>
             </div>
             {settingsError && <p className="settings-error">{settingsError}</p>}
 
