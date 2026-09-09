@@ -1588,7 +1588,7 @@ export default function Home() {
           await new Promise((resolve) => window.setTimeout(resolve, 0));
         }
       } else if (video) {
-        const safeLength = Math.min(clipLength, 6, videoDuration - startAt);
+        const safeLength = Math.min(clipLength, videoDuration - startAt);
         const frameCount = Math.max(1, Math.ceil(safeLength * gifFps));
         for (let frame = 0; frame < frameCount; frame += 1) {
           const time = Math.min(startAt + frame / gifFps, videoDuration - 0.01);
@@ -1662,8 +1662,9 @@ export default function Home() {
     }
   };
 
-  const maxStart = Math.max(0, videoDuration - 0.2);
-  const maxClip = Math.max(0.2, Math.min(6, videoDuration - startAt || 6));
+  const minClip = Math.min(0.2, videoDuration);
+  const maxStart = Math.max(0, videoDuration - minClip);
+  const maxClip = Math.max(minClip, videoDuration - startAt);
 
   return (
     <main onPaste={mode === "gif" ? handleGifPaste : undefined}>
@@ -2264,7 +2265,7 @@ export default function Home() {
                     <span>2</span>
                     <div>
                       <h2>{gifSourceKind === "video" ? "选取精彩片段" : "让图片动起来"}</h2>
-                      <p>{gifSourceKind === "video" ? "最长截取 6 秒，效果更轻巧" : "选择一个适合这张梗图的循环动效"}</p>
+                      <p>{gifSourceKind === "video" ? "长度可选至视频结尾，从 0 秒开始可选完整视频" : "选择一个适合这张梗图的循环动效"}</p>
                     </div>
                   </div>
 
@@ -2283,7 +2284,7 @@ export default function Home() {
                             clearGifResult();
                             const value = Number(event.target.value);
                             setStartAt(value);
-                            setClipLength((length) => Math.min(length, Math.max(0.2, videoDuration - value)));
+                            setClipLength((length) => Math.min(length, videoDuration - value));
                             if (videoRef.current) videoRef.current.currentTime = value;
                           }}
                         />
@@ -2291,7 +2292,7 @@ export default function Home() {
 
                       <label className="range-setting">
                         <span><b>片段长度</b><output>{clipLength.toFixed(1)}s</output></span>
-                        <input type="range" min="0.2" max={maxClip} step="0.1" value={Math.min(clipLength, maxClip)} disabled={converting} onChange={(event) => {
+                        <input type="range" min={minClip} max={maxClip} step="any" value={Math.min(clipLength, maxClip)} disabled={converting} onChange={(event) => {
                           clearGifResult();
                           setClipLength(Number(event.target.value));
                         }} />
