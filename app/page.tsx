@@ -17,6 +17,7 @@ import {
   type GifSourceKind,
 } from "../lib/gif-media";
 import { copyGifBlob } from "../lib/gif-clipboard";
+import { SecondsInput } from "./seconds-input";
 import { createGifFrameEncoder, encodeStillImageGif } from "../lib/generated-image-gif";
 import {
   createStillGifFrames,
@@ -1670,6 +1671,21 @@ export default function Home() {
   const maxStart = Math.max(0, videoDuration - minClip);
   const maxClip = Math.max(minClip, videoDuration - startAt);
 
+  const updateVideoStart = (value: number) => {
+    if (!Number.isFinite(value) || converting) return;
+    const next = Math.min(maxStart, Math.max(0, value));
+    clearGifResult();
+    setStartAt(next);
+    setClipLength((length) => Math.min(length, videoDuration - next));
+    if (videoRef.current) videoRef.current.currentTime = next;
+  };
+
+  const updateVideoLength = (value: number) => {
+    if (!Number.isFinite(value) || converting) return;
+    clearGifResult();
+    setClipLength(Math.min(maxClip, Math.max(minClip, value)));
+  };
+
   return (
     <main onPaste={mode === "gif" ? handleGifPaste : undefined}>
       <header className="site-header">
@@ -2275,32 +2291,25 @@ export default function Home() {
 
                   {gifSourceKind === "video" && sourceReady && (
                     <>
-                      <label className="range-setting">
-                        <span><b>开始时间</b><output>{startAt.toFixed(1)}s</output></span>
+                      <div className="range-setting">
+                        <span><label htmlFor="video-start"><b>开始时间</b></label><SecondsInput label="开始时间" value={startAt} min={0} max={maxStart} disabled={converting} onCommit={updateVideoStart} /></span>
                         <input
+                          id="video-start"
                           type="range"
                           min="0"
                           max={maxStart}
-                          step="0.1"
+                          step="any"
                           value={startAt}
                           disabled={converting}
-                          onChange={(event) => {
-                            clearGifResult();
-                            const value = Number(event.target.value);
-                            setStartAt(value);
-                            setClipLength((length) => Math.min(length, videoDuration - value));
-                            if (videoRef.current) videoRef.current.currentTime = value;
-                          }}
+                          onChange={(event) => updateVideoStart(Number(event.target.value))}
                         />
-                      </label>
+                      </div>
 
-                      <label className="range-setting">
-                        <span><b>片段长度</b><output>{clipLength.toFixed(1)}s</output></span>
-                        <input type="range" min={minClip} max={maxClip} step="any" value={Math.min(clipLength, maxClip)} disabled={converting} onChange={(event) => {
-                          clearGifResult();
-                          setClipLength(Number(event.target.value));
-                        }} />
-                      </label>
+                      <div className="range-setting">
+                        <span><label htmlFor="video-length"><b>片段长度</b></label><SecondsInput label="片段长度" value={clipLength} min={minClip} max={maxClip} disabled={converting} onCommit={updateVideoLength} /></span>
+                        <input id="video-length" type="range" min={minClip} max={maxClip} step="any" value={Math.min(clipLength, maxClip)} disabled={converting} onChange={(event) => updateVideoLength(Number(event.target.value))} />
+                      </div>
+                      <p className="paste-hint">支持输入小数秒，按回车或离开输入框生效。</p>
                     </>
                   )}
 

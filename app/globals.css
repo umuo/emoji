@@ -2237,16 +2237,36 @@ input[type="range"] {
   margin-bottom: 6px;
   display: flex;
   justify-content: space-between;
+  align-items: center;
   font-size: 12px;
 }
 
-.range-setting output {
-  padding: 2px 6px;
-  background: var(--ink);
-  color: var(--white);
-  border-radius: 3px;
-  font-family: monospace;
-  font-size: 10px;
+.seconds-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.seconds-input input {
+  width: 100px;
+  min-height: 36px;
+  padding: 6px 8px;
+  border: 1px solid var(--ink);
+  border-radius: 5px;
+  background: var(--white);
+  color: var(--ink);
+  font: 14px monospace;
+  text-align: right;
+}
+
+.seconds-input input:focus-visible {
+  outline: 2px solid var(--orange);
+  outline-offset: 2px;
+}
+
+.seconds-input input:disabled {
+  opacity: .5;
 }
 
 .select-row {
