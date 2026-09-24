@@ -31,6 +31,7 @@ test("server-renders the meme creator", async () => {
   const html = await response.text();
   assert.match(html, /<html lang="zh-CN">/);
   assert.match(html, /<title>梗一下｜AI 表情包生成器与 GIF 制作器<\/title>/);
+  assert.match(html, /<meta name="referrer" content="no-referrer"\s*\/?>/);
   assert.doesNotMatch(html, /AI 心情出图/);
   assert.match(html, /AI 生图/);
   assert.match(html, /人物表情套装/);

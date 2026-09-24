@@ -20,6 +20,9 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title,
     description,
+    // Video elements use the document policy (unlike images, they have no
+    // referrerPolicy attribute). CDN hotlink checks can reject a Referer.
+    referrer: "no-referrer",
     openGraph: {
       title,
       description,

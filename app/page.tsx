@@ -334,6 +334,7 @@ export default function Home() {
   const [sourceName, setSourceName] = useState("");
   const [sourceLink, setSourceLink] = useState("");
   const [sourceReady, setSourceReady] = useState(false);
+  const [sourceRevision, setSourceRevision] = useState(0);
   const [sourceWidth, setSourceWidth] = useState(0);
   const [sourceHeight, setSourceHeight] = useState(0);
   const [videoDuration, setVideoDuration] = useState(0);
@@ -1369,6 +1370,9 @@ export default function Home() {
     clearGifResult();
     setGifSourceKind(kind);
     setSourceUrl(url);
+    // Remount media even when retrying the same URL, so loading events fire
+    // again after readiness is reset (including paste followed by “读取”).
+    setSourceRevision((revision) => revision + 1);
     setSourceName(name);
     setSourceReady(false);
     setSourceWidth(0);
@@ -2377,11 +2381,11 @@ export default function Home() {
               </div>
               <div className={`video-stage ${!sourceUrl ? "empty" : ""}`}>
                 {sourceUrl && gifSourceKind === "video" && (
-                  <video ref={videoRef} src={sourceUrl} hidden={Boolean(gifUrl)} crossOrigin="anonymous" controls playsInline onLoadedMetadata={onVideoMetadata} onError={onGifSourceError} />
+                  <video key={sourceRevision} ref={videoRef} src={sourceUrl} hidden={Boolean(gifUrl)} crossOrigin="anonymous" controls playsInline onLoadedMetadata={onVideoMetadata} onError={onGifSourceError} />
                 )}
                 {sourceUrl && gifSourceKind === "image" && (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img ref={imageRef} src={sourceUrl} hidden={Boolean(gifUrl)} crossOrigin="anonymous" referrerPolicy="no-referrer" alt="待转换图片预览" onLoad={onImageLoaded} onError={onGifSourceError} />
+                  <img key={sourceRevision} ref={imageRef} src={sourceUrl} hidden={Boolean(gifUrl)} crossOrigin="anonymous" referrerPolicy="no-referrer" alt="待转换图片预览" onLoad={onImageLoaded} onError={onGifSourceError} />
                 )}
                 {gifUrl && (
                   // eslint-disable-next-line @next/next/no-img-element
